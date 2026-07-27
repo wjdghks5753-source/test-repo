@@ -1,0 +1,12 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+SQLAlchemy>=2.0
+pydantic>=2.6
+python-multipart>=0.0.9
+
+# BIODEX 리포트(PDF/PNG)를 직접 업로드해서 OCR로 읽으려면 아래도 필요하다.
+# 설치돼 있지 않아도 앱은 정상 기동하며, CSV 가져오기 경로는 그대로 동작한다.
+# (시스템 패키지도 함께 필요: apt-get install tesseract-ocr tesseract-ocr-kor)
+# pytesseract>=0.3.10
+# PyMuPDF>=1.23
+# Pillow>=10.0
