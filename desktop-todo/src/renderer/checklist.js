@@ -5,13 +5,14 @@ const pad = (n) => String(n).padStart(2, '0');
 
 const el = {
   date: $('dateLabel'), list: $('list'),
-  fill: $('progressFill'), progress: $('progressText'),
+  fill: $('progressFill'), progress: $('progressText'), pct: $('progressPct'),
   title: $('newTitle'), time: $('newTime'), category: $('newCategory'), add: $('addBtn'),
   sync: $('syncBtn'), settings: $('settingsBtn'), hide: $('hideBtn'),
   status: $('statusText'), pending: $('pendingText'),
 };
 
 let state = null;
+let completedOpen = false;   // 완료 섹션 펼침 여부. 창을 새로 열면 다시 접힌다.
 
 // ── 날짜 헬퍼 (main 쪽 dates.js 의 화면용 최소 버전) ──────────
 
@@ -70,8 +71,21 @@ function renderTask(task, today) {
   check.title = task.done ? '완료 취소' : '완료 처리';
   check.setAttribute('aria-pressed', String(task.done));
   check.addEventListener('click', () => {
+    if (row.classList.contains('leaving')) return;   // 연타 방지
+
+    const next = !task.done;
+    const willVanish = next && hideCompleted() && !completedOpen;
+
+    if (willVanish) {
+      // 목록에서 빠지는 게 보이도록 애니메이션을 먼저 보여주고,
+      // 그 뒤에 상태를 바꾼다. patchTask 가 곧바로 다시 그리기 때문이다.
+      row.classList.add('leaving');
+      setTimeout(() => window.todo.patchTask(task.id, { done: true }), 240);
+      return;
+    }
+
     row.classList.toggle('done');           // 응답을 기다리지 않고 바로 반응
-    window.todo.patchTask(task.id, { done: !task.done });
+    window.todo.patchTask(task.id, { done: next });
   });
 
   const body = document.createElement('div');
@@ -143,21 +157,70 @@ function renderGroup(label, tasks, today, cls) {
   return frag;
 }
 
+const hideCompleted = () => Boolean(state && state.settings.hideCompleted);
+
+/**
+ * 완료한 항목은 기본으로 접어둔다.
+ * 밀린 걸 한꺼번에 정리한 날이면 완료 항목이 수십 개가 되어,
+ * 정작 남은 할 일이 그 아래로 파묻힌다.
+ */
+function renderCompleted(tasks, today) {
+  if (!tasks.length) return null;
+  if (!hideCompleted()) return renderGroup('완료', tasks, today, null);
+
+  const frag = document.createDocumentFragment();
+
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'group-title toggle';
+  head.title = completedOpen ? '접기' : '펼쳐서 보기';
+
+  // 삼각형은 CSS 로 그린다. 글꼴에 따라 ▸ 가 점으로 깨져 보이는 환경이 있다.
+  const caret = document.createElement('span');
+  caret.className = completedOpen ? 'caret open' : 'caret';
+  head.append(caret, document.createTextNode(`완료 ${tasks.length}`));
+  head.addEventListener('click', () => { completedOpen = !completedOpen; render(); });
+
+  frag.appendChild(head);
+  if (completedOpen) for (const t of tasks) frag.appendChild(renderTask(t, today));
+  return frag;
+}
+
 function render() {
   if (!state) return;
   const { tasks, today, status } = state;
 
   el.date.textContent = humanDate(today);
 
+  const g = groupTasks(tasks, today);
   const open = tasks.filter((t) => !t.done);
   const done = tasks.filter((t) => t.done);
   const total = tasks.length;
-  el.fill.style.width = total ? `${Math.round((done.length / total) * 100)}%` : '0%';
-  el.progress.textContent = total
-    ? `${done.length} / ${total} 완료 · 남은 ${open.length}건`
-    : '오늘 등록된 할 일이 없습니다';
 
-  const g = groupTasks(tasks, today);
+  // 완료율은 항목 개수 기준이다: 오늘 목록에 오른 것 중 몇 개를 체크했나.
+  // 반올림해서 100%가 되어도 남은 항목이 있으면 99%로 묶어둔다.
+  // 다 끝나지 않았는데 100%로 보이면 그게 더 헷갈린다.
+  let percent = 0;
+  if (total) {
+    percent = Math.round((done.length / total) * 100);
+    if (percent === 100 && open.length) percent = 99;
+    if (percent === 0 && done.length) percent = 1;
+  }
+
+  el.pct.textContent = total ? `${percent}%` : '—';
+  el.pct.classList.toggle('full', total > 0 && !open.length);
+  el.fill.style.width = `${percent}%`;
+  el.fill.classList.toggle('full', total > 0 && !open.length);
+
+  if (!total) {
+    el.progress.textContent = '오늘 등록된 할 일이 없습니다';
+  } else {
+    const parts = [`${done.length} / ${total} 완료`];
+    if (open.length) parts.push(`남은 ${open.length}건`);
+    if (g.overdue.length) parts.push(`지연 ${g.overdue.length}건`);
+    el.progress.textContent = parts.join(' · ');
+  }
+
   el.list.replaceChildren();
 
   if (!total) {
@@ -173,11 +236,24 @@ function render() {
       ['지연', g.overdue, 'overdue'],
       ['오늘', g.today, null],
       ['마감일 없음', g.undated, null],
-      ['완료', g.done, null],
     ]) {
       const frag = renderGroup(label, list, today, cls);
       if (frag) el.list.appendChild(frag);
     }
+
+    if (!open.length) {
+      const cleared = document.createElement('div');
+      cleared.className = 'empty cleared';
+      const big = document.createElement('span');
+      big.className = 'big';
+      big.textContent = '✓';
+      cleared.appendChild(big);
+      cleared.append(document.createTextNode('오늘 할 일을 모두 끝냈습니다.'));
+      el.list.appendChild(cleared);
+    }
+
+    const doneFrag = renderCompleted(g.done, today);
+    if (doneFrag) el.list.appendChild(doneFrag);
   }
 
   el.sync.classList.toggle('spin', Boolean(status.syncing));

@@ -183,6 +183,7 @@ $('saveBtn').addEventListener('click', async () => {
     syncIntervalMin: Math.max(1, Number($('syncIntervalMin').value) || 5),
     carryOverDays: Math.max(0, Number($('carryOverDays').value) || 0),
     includeNoDueDate: $('includeNoDueDate').checked,
+    hideCompleted: $('hideCompleted').checked,
     autoLaunch: $('autoLaunch').checked,
     showOnLaunch: $('showOnLaunch').checked,
     alwaysOnTop: $('alwaysOnTop').checked,
@@ -217,6 +218,7 @@ window.todo.getState().then((state) => {
   $('syncIntervalMin').value = s.syncIntervalMin ?? 5;
   $('carryOverDays').value = s.carryOverDays ?? 7;
   $('includeNoDueDate').checked = Boolean(s.includeNoDueDate);
+  $('hideCompleted').checked = s.hideCompleted !== false;
   $('autoLaunch').checked = Boolean(s.autoLaunch);
   $('showOnLaunch').checked = Boolean(s.showOnLaunch);
   $('alwaysOnTop').checked = Boolean(s.alwaysOnTop);

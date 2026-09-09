@@ -6,6 +6,9 @@ const { NotionError } = require('./notion');
 
 const isLocalId = (id) => typeof id === 'string' && id.startsWith('local:');
 
+// 동기화 도중 들어온 변경까지 이어서 보내되, 무한히 돌지는 않게 한다.
+const MAX_SYNC_ROUNDS = 5;
+
 /**
  * 로컬 캐시가 화면의 진실이고, 노션이 저장소의 진실이다.
  *
@@ -184,7 +187,14 @@ class SyncEngine {
   }
 
   async sync() {
-    if (this.status.syncing) return this.status;
+    // 이미 돌고 있으면 겹쳐 돌리지 않는다. 대신 "끝나고 한 번 더" 표시만 남긴다.
+    // 항목을 연달아 체크하면 sync 가 그 횟수만큼 불리는데, 이 표시가 없으면
+    // 첫 번째 호출만 일하고 나머지 변경은 다음 주기(최대 5분)까지 묶여 있게 된다.
+    if (this.status.syncing) {
+      this.again = true;
+      return this.status;
+    }
+
     if (!this.client.configured) {
       this.status = { ...this.status, syncing: false, error: '노션 토큰을 먼저 설정해 주세요.' };
       this.onChange();
@@ -194,27 +204,40 @@ class SyncEngine {
     this.status = { ...this.status, syncing: true, error: null };
     this.onChange();
 
-    try {
-      if (!this.client.schema) await this.client.loadSchema();
-      const failures = await this.push();
-      await this.pull();
-      this.status = {
-        syncing: false,
-        lastSyncAt: this.cache.get('lastSyncAt'),
-        error: failures.length ? `일부 항목 반영 실패 — ${failures[0]}` : null,
-      };
-    } catch (err) {
-      this.status = { syncing: false, lastSyncAt: this.cache.get('lastSyncAt'), error: err.message };
-    }
+    let error = null;
+    let rounds = 0;
 
+    do {
+      this.again = false;
+      rounds += 1;
+      try {
+        if (!this.client.schema) await this.client.loadSchema();
+        const failures = await this.push();
+        await this.pull();
+        error = failures.length ? `일부 항목 반영 실패 — ${failures[0]}` : null;
+      } catch (err) {
+        error = err.message;
+        break;
+      }
+    } while ((this.again || this.outbox.length) && rounds < MAX_SYNC_ROUNDS);
+
+    this.status = { syncing: false, lastSyncAt: this.cache.get('lastSyncAt'), error };
     this.onChange();
     return this.status;
   }
 }
 
-/** 마감 시각 있는 것 먼저, 그다음 마감일 순, 완료된 것은 아래로. */
+/** 미완료가 위, 그 안에서는 마감일 순. 완료된 것은 최근에 끝낸 순으로 아래에. */
 function sortTasks(a, b) {
   if (a.done !== b.done) return a.done ? 1 : -1;
+
+  if (a.done) {
+    // 방금 끝낸 것이 완료 목록 맨 위로 오는 편이 되짚어보기 좋다.
+    if (a.doneAt && b.doneAt) return new Date(b.doneAt) - new Date(a.doneAt);
+    if (a.doneAt) return -1;
+    if (b.doneAt) return 1;
+  }
+
   if (!a.due && !b.due) return a.title.localeCompare(b.title, 'ko');
   if (!a.due) return 1;
   if (!b.due) return -1;

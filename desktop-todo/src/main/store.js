@@ -71,6 +71,9 @@ const DEFAULT_SETTINGS = {
   notifyBeforeMin: 10,       // 마감 시각 N분 전 알림 (0 = 끔)
   popupOnNotify: true,       // 알림과 함께 체크리스트 창을 띄울지
 
+  // 목록
+  hideCompleted: true,       // 체크한 항목을 접어두고 목록에서 치울지
+
   // 창
   autoLaunch: true,
   showOnLaunch: true,

@@ -5,7 +5,14 @@
   border-bottom: 1px solid var(--line);
 }
 
+.progress-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .progress .bar {
+  flex: 1;
   height: 6px;
   border-radius: 6px;
   background: var(--panel-2);
@@ -17,8 +24,23 @@
   width: 0;
   border-radius: 6px;
   background: var(--accent);
-  transition: width .25s ease;
+  transition: width .3s ease, background-color .3s ease;
 }
+
+.progress .fill.full { background: var(--ok); }
+
+.progress .pct {
+  flex: none;
+  min-width: 38px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  transition: color .3s ease;
+}
+
+.progress .pct.full { color: var(--ok); }
 
 .progress-text {
   margin-top: 6px;
@@ -52,6 +74,37 @@
 }
 
 .group-title.overdue { color: var(--danger); }
+
+/* 접었다 펼치는 완료 섹션 헤더 */
+.group-title.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--faint);
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.group-title.toggle:hover { color: var(--text); }
+.group-title.toggle .caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  transition: transform .18s ease;
+}
+
+.group-title.toggle .caret.open { transform: rotate(90deg); }
 
 .task {
   display: flex;
@@ -149,6 +202,28 @@
 }
 
 .empty .big { font-size: 30px; display: block; margin-bottom: 8px; }
+
+/* 남은 할 일이 없을 때. 아래의 완료 섹션과 맞물리므로 여백을 줄인다. */
+.empty.cleared { padding: 30px 24px 22px; color: var(--ok); }
+.empty.cleared .big { font-size: 26px; margin-bottom: 6px; }
+
+/* 체크하면 목록에서 빠져나가는 연출 */
+@keyframes taskLeave {
+  from { opacity: 1; max-height: 300px; transform: none; }
+  to   { opacity: 0; max-height: 0; transform: translateX(28px);
+         padding-top: 0; padding-bottom: 0; }
+}
+
+.task.leaving {
+  animation: taskLeave .24s ease forwards;
+  overflow: hidden;
+  pointer-events: none;
+  border-bottom-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task.leaving { animation-duration: .01s; }
+}
 
 /* ── 상태바 ───────────────────────────────────────────── */
 

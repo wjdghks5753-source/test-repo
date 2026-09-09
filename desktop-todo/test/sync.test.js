@@ -178,3 +178,58 @@ test('아직 안 올린 항목을 지우면 노션 호출 없이 사라진다', 
   await engine.push();
   assert.equal(client.calls.length, 0);
 });
+
+test('완료 항목은 최근에 끝낸 순으로 정렬된다', () => {
+  const { sortTasks } = require('../src/main/sync');
+  const list = [
+    { done: true,  title: '아침',   due: null, doneAt: '2026-09-10T08:30:00+09:00' },
+    { done: false, title: '남은 일', due: '2026-09-10T18:00:00+09:00', doneAt: null },
+    { done: true,  title: '점심',   due: null, doneAt: '2026-09-10T13:10:00+09:00' },
+  ].sort(sortTasks);
+
+  assert.deepEqual(list.map((t) => t.title), ['남은 일', '점심', '아침'],
+    '미완료가 위, 완료는 방금 끝낸 것부터');
+});
+
+test('동기화가 도는 중에 체크한 항목도 같은 번에 함께 올라간다', async () => {
+  const client = fakeClient();
+  const engine = tmpEngine(client);
+
+  // 첫 번째 생성 요청을 붙잡아 두고, 그 사이에 항목을 하나 더 추가한다.
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const original = client.createTask;
+  let held = false;
+  client.createTask = async (payload) => {
+    if (!held) { held = true; await gate; }
+    return original(payload);
+  };
+
+  engine.addTask({ title: '첫 번째' });
+  const running = engine.sync();
+
+  await new Promise((r) => setImmediate(r));
+  engine.addTask({ title: '두 번째' });
+  engine.sync();            // 이미 도는 중이라 "끝나고 한 번 더" 표시만 남는다
+  release();
+
+  await running;
+
+  assert.equal(engine.outbox.length, 0, '두 번째 항목이 다음 주기까지 밀리면 안 된다');
+  assert.equal(engine.tasks.filter((t) => !isLocalId(t.id)).length, 2);
+});
+
+test('동기화가 실패하면 무한히 재시도하지 않는다', async () => {
+  const client = fakeClient();
+  const engine = tmpEngine(client);
+  engine.addTask({ title: '안 올라갈 항목' });
+
+  let attempts = 0;
+  client.createTask = async () => { attempts += 1; throw new NotionError('네트워크 오류', 0); };
+
+  const status = await engine.sync();
+
+  assert.ok(status.error, '오류가 사용자에게 보여야 한다');
+  assert.ok(attempts <= 5, `재시도 ${attempts}회 — 상한이 걸려 있어야 한다`);
+  assert.equal(engine.outbox.length, 1, '변경 자체는 남아 다음 기회에 다시 시도한다');
+});
