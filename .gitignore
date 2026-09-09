@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 biodex_extract/samples/*_biodex.csv
 biodex_extract/samples/*_biodex.xlsx
+node_modules/
+dist/

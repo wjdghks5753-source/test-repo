@@ -1,0 +1,50 @@
+{
+  "name": "sjs-daily-todo",
+  "productName": "오늘 할 일",
+  "version": "1.0.0",
+  "description": "노션 연동 데스크톱 할 일 알림 · 체크리스트",
+  "main": "src/main/main.js",
+  "author": "강정환",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "pack": "electron-builder --win --dir",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "kr.sejongsports.dailytodo",
+    "productName": "오늘 할 일",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "오늘 할 일"
+    },
+    "portable": {
+      "artifactName": "오늘할일-portable-${version}.exe"
+    }
+  }
+}

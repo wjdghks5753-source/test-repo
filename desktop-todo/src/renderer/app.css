@@ -1,0 +1,157 @@
+/* 두 창이 함께 쓰는 기본 스타일 */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #f1f3f6;
+  --line: #e3e7ed;
+  --text: #16191f;
+  --muted: #6b7280;
+  --faint: #9aa2ae;
+  --accent: #2f6bff;
+  --accent-soft: #e8efff;
+  --danger: #d1414a;
+  --ok: #17864a;
+  --warn: #b4610a;
+  --shadow: 0 10px 30px rgba(16, 22, 35, .12);
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15181d;
+    --panel: #1c2027;
+    --panel-2: #232830;
+    --line: #2e343e;
+    --text: #e9edf3;
+    --muted: #9aa3b0;
+    --faint: #6c7583;
+    --accent: #6d9bff;
+    --accent-soft: #24314e;
+    --danger: #ff7b83;
+    --ok: #4fc98a;
+    --warn: #e0a049;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Pretendard", "Malgun Gothic", "맑은 고딕", -apple-system,
+        BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── 타이틀바 ─────────────────────────────────────────── */
+
+.titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 8px 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.titlebar h1 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+  letter-spacing: -.01em;
+}
+
+.titlebar .date {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spacer { flex: 1; }
+
+.winbtns {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 2px;
+}
+
+.iconbtn {
+  -webkit-app-region: no-drag;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+
+.iconbtn:hover { background: var(--panel-2); color: var(--text); }
+.iconbtn.danger:hover { background: var(--danger); color: #fff; }
+.iconbtn.spin { animation: spin 1s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 공통 폼 ──────────────────────────────────────────── */
+
+input, select, textarea, button { font: inherit; color: inherit; }
+
+.field {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  outline: none;
+  user-select: text;
+}
+
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.btn {
+  -webkit-app-region: no-drag;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  cursor: pointer;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.btn:hover { background: var(--panel-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.scroll::-webkit-scrollbar { width: 10px; }
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 10px;
+  border: 3px solid var(--bg);
+}
