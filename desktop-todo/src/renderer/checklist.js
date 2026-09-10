@@ -13,6 +13,7 @@ const el = {
 
 let state = null;
 let completedOpen = false;   // 완료 섹션 펼침 여부. 창을 새로 열면 다시 접힌다.
+let editingId = null;        // 지금 수정 중인 항목. 편집 중에는 다시 그리지 않는다.
 
 // ── 날짜 헬퍼 (main 쪽 dates.js 의 화면용 최소 버전) ──────────
 
@@ -94,6 +95,8 @@ function renderTask(task, today) {
   const title = document.createElement('div');
   title.className = 'title';
   title.textContent = task.title;           // textContent — 노션 내용이 HTML 로 해석되지 않게
+  title.title = '눌러서 수정';
+  title.addEventListener('click', () => startEdit(task.id));
   body.appendChild(title);
 
   const meta = document.createElement('div');
@@ -121,6 +124,13 @@ function renderTask(task, today) {
 
   const btns = document.createElement('div');
   btns.className = 'rowbtns';
+
+  const edit = document.createElement('button');
+  edit.className = 'rowbtn';
+  edit.textContent = '✎';
+  edit.title = '수정 (제목·시각·분류·메모)';
+  edit.addEventListener('click', () => startEdit(task.id));
+  btns.appendChild(edit);
 
   if (task.url) {
     const open = document.createElement('button');
@@ -153,11 +163,112 @@ function renderGroup(label, tasks, today, cls) {
   head.className = cls ? `group-title ${cls}` : 'group-title';
   head.textContent = `${label} ${tasks.length}`;
   frag.appendChild(head);
-  for (const t of tasks) frag.appendChild(renderTask(t, today));
+  for (const t of tasks) frag.appendChild(renderRow(t, today));
   return frag;
 }
 
 const hideCompleted = () => Boolean(state && state.settings.hideCompleted);
+
+const CATEGORIES = ['스터디', '업무', '환자', '연구', '개인'];
+
+function startEdit(id) {
+  editingId = id;
+  render({ force: true });
+}
+
+function stopEdit() {
+  editingId = null;
+  render({ force: true });
+}
+
+function field(type, value, placeholder) {
+  const input = document.createElement('input');
+  input.className = 'field';
+  input.type = type;
+  input.value = value || '';
+  if (placeholder) input.placeholder = placeholder;
+  return input;
+}
+
+/**
+ * 항목을 그 자리에서 고치는 폼. 노션에 다녀오지 않아도 되도록
+ * 화면에 보이는 값(제목·마감·분류·메모)은 전부 여기서 바꿀 수 있다.
+ */
+function renderEditor(task) {
+  const form = document.createElement('form');
+  form.className = 'task-editor';
+
+  const title = field('text', task.title, '할 일');
+  const date = field('date', task.due ? dueKey(task.due) : '');
+  const time = field('time', timeLabel(task.due) || '');
+  const note = field('text', task.note, '메모 (선택)');
+
+  const category = document.createElement('select');
+  category.className = 'field';
+  for (const name of ['', ...CATEGORIES]) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name || '분류 없음';
+    category.appendChild(option);
+  }
+  category.value = task.category || '';
+
+  const when = document.createElement('div');
+  when.className = 'editor-row';
+  when.append(date, time, category);
+
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'btn primary';
+  save.textContent = '저장';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn';
+  cancel.textContent = '취소';
+  cancel.addEventListener('click', stopEdit);
+
+  const later = document.createElement('button');
+  later.type = 'button';
+  later.className = 'btn';
+  later.textContent = '내일로';
+  later.title = '마감일을 하루 미룹니다 (저장을 눌러야 반영됩니다)';
+  later.addEventListener('click', () => {
+    date.value = window.TodoUtil.shiftDate(date.value || state.today, 1);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'editor-row actions';
+  const gap = document.createElement('div');
+  gap.className = 'spacer';
+  actions.append(save, cancel, gap, later);
+
+  form.append(title, when, note, actions);
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const next = title.value.trim();
+    if (!next) { title.focus(); return; }
+
+    editingId = null;
+    window.todo.patchTask(task.id, {
+      title: next,
+      due: window.TodoUtil.buildDue(date.value, time.value),
+      category: category.value || null,
+      note: note.value.trim(),
+    });
+    render({ force: true });
+  });
+
+  form.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); stopEdit(); }
+  });
+
+  return form;
+}
+
+const renderRow = (task, today) =>
+  (task.id === editingId ? renderEditor(task) : renderTask(task, today));
 
 /**
  * 완료한 항목은 기본으로 접어둔다.
@@ -182,12 +293,22 @@ function renderCompleted(tasks, today) {
   head.addEventListener('click', () => { completedOpen = !completedOpen; render(); });
 
   frag.appendChild(head);
-  if (completedOpen) for (const t of tasks) frag.appendChild(renderTask(t, today));
+  if (completedOpen) for (const t of tasks) frag.appendChild(renderRow(t, today));
   return frag;
 }
 
-function render() {
+function render({ force = false } = {}) {
   if (!state) return;
+
+  // 수정하던 항목이 목록에서 사라졌다면(다른 기기에서 지웠거나 마감일이 바뀌어
+  // 오늘 목록에서 빠진 경우) 편집 상태를 푼다. 이걸 안 하면 아래 가드에 걸려
+  // 화면이 영영 갱신되지 않는다.
+  if (editingId && !state.tasks.some((t) => t.id === editingId)) editingId = null;
+
+  // 수정 중에 다시 그리면 입력하던 내용이 날아간다.
+  // 동기화가 5분마다 도는 앱이라 이 가드가 없으면 실제로 겪게 된다.
+  if (editingId && !force) return;
+
   const { tasks, today, status } = state;
 
   el.date.textContent = humanDate(today);
@@ -197,20 +318,14 @@ function render() {
   const done = tasks.filter((t) => t.done);
   const total = tasks.length;
 
-  // 완료율은 항목 개수 기준이다: 오늘 목록에 오른 것 중 몇 개를 체크했나.
-  // 반올림해서 100%가 되어도 남은 항목이 있으면 99%로 묶어둔다.
-  // 다 끝나지 않았는데 100%로 보이면 그게 더 헷갈린다.
-  let percent = 0;
-  if (total) {
-    percent = Math.round((done.length / total) * 100);
-    if (percent === 100 && open.length) percent = 99;
-    if (percent === 0 && done.length) percent = 1;
-  }
+  // 완료율은 항목 개수 기준. 99% 이상이면 100%로 올려 보여준다.
+  const percent = window.TodoUtil.completionPercent(done.length, total);
+  const allDone = total > 0 && !open.length;
 
   el.pct.textContent = total ? `${percent}%` : '—';
-  el.pct.classList.toggle('full', total > 0 && !open.length);
+  el.pct.classList.toggle('full', allDone);
   el.fill.style.width = `${percent}%`;
-  el.fill.classList.toggle('full', total > 0 && !open.length);
+  el.fill.classList.toggle('full', allDone);
 
   if (!total) {
     el.progress.textContent = '오늘 등록된 할 일이 없습니다';
@@ -256,6 +371,11 @@ function render() {
     if (doneFrag) el.list.appendChild(doneFrag);
   }
 
+  if (editingId) {
+    const first = el.list.querySelector('.task-editor input');
+    if (first) first.focus();
+  }
+
   el.sync.classList.toggle('spin', Boolean(status.syncing));
   el.status.textContent = status.error || relativeTime(status.lastSyncAt);
   el.status.classList.toggle('err', Boolean(status.error));
@@ -269,16 +389,7 @@ function submit() {
   if (!title) return;
 
   const today = state ? state.today : dateKey();
-  let due = today;
-  if (el.time.value) {
-    const [h, m] = el.time.value.split(':').map(Number);
-    const d = new Date(`${today}T00:00:00`);
-    d.setHours(h, m, 0, 0);
-    const off = -d.getTimezoneOffset();
-    const sign = off >= 0 ? '+' : '-';
-    const abs = Math.abs(off);
-    due = `${today}T${pad(h)}:${pad(m)}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-  }
+  const due = window.TodoUtil.buildDue(today, el.time.value);
 
   window.todo.addTask({ title, due, category: el.category.value || null });
   el.title.value = '';
@@ -301,4 +412,4 @@ window.todo.getState().then((data) => {
 });
 
 // "n분 전 동기화" 표시를 살아있게 유지한다.
-setInterval(render, 30000);
+setInterval(() => render(), 30000);

@@ -240,3 +240,40 @@
 }
 
 .statusbar .err { color: var(--danger); }
+
+/* ── 그 자리에서 수정하기 ─────────────────────────────── */
+
+.task-editor {
+  display: grid;
+  gap: 7px;
+  padding: 11px 16px 13px 13px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+}
+
+.task-editor .field {
+  padding: 7px 9px;
+  font-size: 13px;
+}
+
+.editor-row {
+  display: flex;
+  gap: 6px;
+}
+
+.editor-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-row.actions { align-items: center; }
+
+.editor-row.actions .btn {
+  padding: 6px 13px;
+  font-size: 12.5px;
+}
+
+.title { cursor: text; }
+.title:hover { text-decoration: underline dotted var(--faint); }
+.task.done .title:hover { text-decoration: line-through; }
