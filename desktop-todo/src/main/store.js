@@ -55,11 +55,45 @@ class JsonFile {
   }
 }
 
+/**
+ * 카테고리 = 노션 DB 하나.
+ *
+ * 세 DB 는 속성 이름이 서로 다르다 (할 일/이름, 완료/체크박스, 진행일시/날짜).
+ * props 가 그 차이를 흡수한다. 값이 비어 있는 속성은 그 DB 에 없다는 뜻이고,
+ * 앱은 해당 기능만 조용히 건너뛴다.
+ */
+const DEFAULT_SOURCES = [
+  {
+    id: 'personal',
+    label: 'PERSONAL',
+    color: 'gray',
+    databaseId: '2c48143c-2e66-8067-9c75-cd40794671d7',
+    props: { title: '할 일', done: '완료', due: '진행일시', note: '텍스트', doneAt: '' },
+    enabled: true,
+  },
+  {
+    id: 'project',
+    label: 'SJS PROJECT',
+    color: 'blue',
+    databaseId: '3cd8143c-2e66-8050-934a-ca0e2cfef191',
+    props: { title: '이름', done: '체크박스', due: '날짜', note: '', doneAt: '' },
+    enabled: true,
+  },
+  {
+    id: 'study',
+    label: 'SJS STUDY',
+    color: 'green',
+    databaseId: '3d68143c-2e66-80b0-8d39-d64baac0b22d',
+    props: { title: '이름', done: '체크박스', due: '날짜', note: '', doneAt: '' },
+    enabled: true,
+  },
+];
+
 const DEFAULT_SETTINGS = {
   // 노션
   notionTokenEnc: null,      // safeStorage 로 암호화된 토큰 (base64)
   notionTokenPlain: null,    // safeStorage 를 못 쓰는 환경의 폴백
-  databaseId: '2c48143c-2e66-8067-9c75-cd40794671d7',
+  sources: DEFAULT_SOURCES,
 
   // 동기화
   syncIntervalMin: 5,
@@ -80,7 +114,7 @@ const DEFAULT_SETTINGS = {
   alwaysOnTop: false,
   windowBounds: null,
 
-  defaultCategory: '업무',
+  defaultSourceId: 'personal',
 };
 
 const DEFAULT_CACHE = {
@@ -98,4 +132,4 @@ const DEFAULT_ROUTINES = {
   routines: [],
 };
 
-module.exports = { JsonFile, DEFAULT_SETTINGS, DEFAULT_CACHE, DEFAULT_ROUTINES };
+module.exports = { JsonFile, DEFAULT_SETTINGS, DEFAULT_CACHE, DEFAULT_ROUTINES, DEFAULT_SOURCES };

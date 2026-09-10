@@ -11,11 +11,26 @@ const { SyncEngine } = require('../src/main/sync');
 const routines = require('../src/main/routines');
 const D = require('../src/main/dates');
 
+const SOURCES = [
+  {
+    id: 'personal', label: 'PERSONAL', color: 'gray', databaseId: 'db-personal',
+    props: { title: '할 일', done: '완료', due: '진행일시', note: '텍스트', doneAt: '' },
+    enabled: true,
+  },
+  {
+    id: 'study', label: 'SJS STUDY', color: 'green', databaseId: 'db-study',
+    props: { title: '이름', done: '체크박스', due: '날짜', note: '', doneAt: '' },
+    enabled: true,
+  },
+];
+
 function harness() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'todo-routine-'));
   const settings = new JsonFile(path.join(dir, 'config.json'), DEFAULT_SETTINGS);
   const cache = new JsonFile(path.join(dir, 'cache.json'), DEFAULT_CACHE);
   const routinesFile = new JsonFile(path.join(dir, 'routines.json'), DEFAULT_ROUTINES);
+  settings.set('sources', JSON.parse(JSON.stringify(SOURCES)));
+  settings.set('defaultSourceId', 'personal');
   const engine = new SyncEngine({ cache, settings, client: { configured: true }, onChange: () => {} });
   return { engine, cache, routinesFile };
 }
@@ -34,7 +49,6 @@ test('오늘 요일에 해당하는 루틴만 만들어진다', () => {
 
   assert.deepEqual(made, ['오늘 것']);
   assert.equal(engine.tasks.length, 1);
-  assert.equal(engine.tasks[0].source, '루틴');
   assert.equal(D.toDateKey(engine.tasks[0].due), today());
 });
 
@@ -80,4 +94,26 @@ test('루틴 로그는 무한정 쌓이지 않는다', () => {
 test('describe 는 요일을 읽기 좋게 보여준다', () => {
   assert.equal(routines.describe({ days: [1, 3, 5], time: '07:30' }), '월·수·금 07:30');
   assert.equal(routines.describe({ days: [0, 1, 2, 3, 4, 5, 6], time: null }), '매일');
+});
+
+test('반복 할 일은 지정한 카테고리의 DB 로 들어간다', () => {
+  const { engine, cache, routinesFile } = harness();
+  routines.addRoutine(routinesFile, {
+    title: '논문 리딩 30분', days: [todayWeekday()], time: '07:30', sourceId: 'study',
+  });
+
+  routines.materializeToday(engine, routinesFile, cache);
+
+  assert.equal(engine.tasks[0].sourceId, 'study');
+  assert.equal(engine.tasks[0].category, 'SJS STUDY');
+  assert.equal(engine.outbox[0].sourceId, 'study', '노션에도 그 DB 로 보내야 한다');
+});
+
+test('카테고리를 안 고른 반복 할 일은 기본 카테고리로 간다', () => {
+  const { engine, cache, routinesFile } = harness();
+  routines.addRoutine(routinesFile, { title: '커피', days: [todayWeekday()] });
+
+  routines.materializeToday(engine, routinesFile, cache);
+
+  assert.equal(engine.tasks[0].sourceId, 'personal');
 });

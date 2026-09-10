@@ -30,6 +30,8 @@
     <div class="progress-text" id="progressText">불러오는 중…</div>
   </section>
 
+  <nav class="tabs" id="tabs"></nav>
+
   <section class="composer">
     <div class="composer-row">
       <input class="field" id="newTitle" placeholder="할 일 추가 후 Enter" autocomplete="off" />
@@ -37,14 +39,7 @@
     </div>
     <div class="composer-row sub">
       <input class="field" id="newTime" type="time" title="마감 시각 (비워두면 종일)" />
-      <select class="field" id="newCategory" title="분류">
-        <option value="">분류 없음</option>
-        <option>스터디</option>
-        <option>업무</option>
-        <option>환자</option>
-        <option>연구</option>
-        <option>개인</option>
-      </select>
+      <select class="field" id="newSource" title="어느 카테고리에 추가할지"></select>
     </div>
   </section>
 

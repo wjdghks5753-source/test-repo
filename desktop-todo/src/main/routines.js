@@ -26,8 +26,7 @@ function materializeToday(engine, routinesFile, cache) {
       title: r.title,
       due: r.time ? D.toNotionDateTime(D.atTime(today, r.time)) : today,
       note: r.note || '',
-      category: r.category || null,
-      source: '루틴',
+      sourceId: r.sourceId || null,
     });
     already.add(r.id);
     created.push(r.title);
@@ -47,13 +46,13 @@ function pruneLog(log) {
   }
 }
 
-function addRoutine(routinesFile, { title, days, time, category, note }) {
+function addRoutine(routinesFile, { title, days, time, sourceId, note }) {
   const routine = {
     id: crypto.randomUUID(),
     title: String(title || '').trim(),
     days: Array.isArray(days) ? days.map(Number).filter((d) => d >= 0 && d <= 6) : [],
     time: time || null,
-    category: category || null,
+    sourceId: sourceId || null,   // 어느 카테고리(노션 DB)에 만들지
     note: note || '',
     enabled: true,
   };

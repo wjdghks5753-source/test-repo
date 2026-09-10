@@ -241,6 +241,7 @@ function snapshot() {
     tasks: engine ? engine.tasks : [],
     status: engine ? engine.status : { syncing: false, error: null, lastSyncAt: null },
     settings: publicSettings(),
+    sources: settings.get('sources') || [],
     routines: routinesFile.get('routines'),
     outboxCount: engine ? engine.outbox.length : 0,
   };
@@ -302,8 +303,7 @@ function registerIpc() {
     settings.update(rest);
 
     client.token = readToken();
-    client.databaseId = settings.get('databaseId');
-    client.schema = null; // DB 가 바뀌었을 수 있으니 스키마를 다시 읽게 한다
+    client.schemas.clear(); // DB 나 속성 이름이 바뀌었을 수 있으니 다시 읽게 한다
 
     applyAutoLaunch();
     if (checklistWindow && !checklistWindow.isDestroyed()) {
@@ -314,16 +314,24 @@ function registerIpc() {
   });
 
   ipcMain.handle('notion:test', async (_e, patch) => {
-    const probe = new NotionClient({
-      token: patch?.notionToken || readToken(),
-      databaseId: patch?.databaseId || settings.get('databaseId'),
-    });
-    try {
-      const info = await probe.loadSchema();
-      return { ok: true, ...info };
-    } catch (err) {
-      return { ok: false, error: err.message };
+    const probe = new NotionClient({ token: patch?.notionToken || readToken() });
+    const sources = (patch && patch.sources) || settings.get('sources') || [];
+    const results = [];
+
+    for (const source of sources) {
+      if (source.enabled === false) continue;
+      if (!source.databaseId) {
+        results.push({ label: source.label, ok: false, error: '데이터베이스 ID 가 비어 있습니다.' });
+        continue;
+      }
+      try {
+        const info = await probe.loadSchema(source);
+        results.push({ label: source.label, ok: true, title: info.title, missing: info.missing });
+      } catch (err) {
+        results.push({ label: source.label, ok: false, error: err.message });
+      }
     }
+    return { results };
   });
 
   ipcMain.handle('routine:add', (_e, payload) => routines.addRoutine(routinesFile, payload));
@@ -343,6 +351,23 @@ function registerIpc() {
   });
 }
 
+/**
+ * 예전 설정은 DB 를 하나만 들고 있었다 (settings.databaseId).
+ * 그 값을 PERSONAL 카테고리로 옮겨, 사용자가 바꿔둔 DB 를 잃지 않게 한다.
+ */
+function migrateSources() {
+  const legacy = settings.data.databaseId;
+  if (!legacy) return;
+
+  const sources = settings.get('sources') || [];
+  const personal = sources.find((s) => s.id === 'personal');
+  if (personal && personal.databaseId !== legacy) {
+    personal.databaseId = legacy;
+  }
+  delete settings.data.databaseId;
+  settings.save();
+}
+
 // ── 부팅 ──────────────────────────────────────────────────────
 
 app.on('second-instance', showChecklist);
@@ -353,7 +378,8 @@ app.whenReady().then(async () => {
   cache = new JsonFile(path.join(dir, 'cache.json'), DEFAULT_CACHE);
   routinesFile = new JsonFile(path.join(dir, 'routines.json'), DEFAULT_ROUTINES);
 
-  client = new NotionClient({ token: readToken(), databaseId: settings.get('databaseId') });
+  migrateSources();
+  client = new NotionClient({ token: readToken() });
   engine = new SyncEngine({ cache, settings, client, onChange: broadcast });
   scheduler = new Scheduler({ cache, settings, engine, notify, onDayRollover });
 

@@ -14,6 +14,9 @@ const MAX_SYNC_ROUNDS = 5;
  *
  * 체크를 누르면 화면은 즉시 바뀌고(낙관적 갱신) 변경은 outbox 에 쌓인다.
  * 인터넷이 끊겨 있어도 앱은 그대로 동작하고, 연결되면 밀린 변경을 순서대로 보낸다.
+ *
+ * 카테고리(PERSONAL / SJS PROJECT / SJS STUDY)는 각각 별도의 노션 DB 이고,
+ * 항목은 자기가 어느 DB 에서 왔는지 sourceId 로 기억한다.
  */
 class SyncEngine {
   constructor({ cache, settings, client, onChange }) {
@@ -27,6 +30,13 @@ class SyncEngine {
   get tasks() { return this.cache.get('tasks'); }
   get outbox() { return this.cache.get('outbox'); }
 
+  get sources() { return this.settings.get('sources') || []; }
+  get enabledSources() { return this.sources.filter((s) => s.enabled !== false && s.databaseId); }
+
+  sourceOf(id) {
+    return this.sources.find((s) => s.id === id) || this.enabledSources[0] || null;
+  }
+
   _commit() {
     this.cache.save();
     this.onChange();
@@ -38,24 +48,30 @@ class SyncEngine {
 
   // ── 로컬 변경 ────────────────────────────────────────────────
 
-  addTask({ title, due, note, category, source }) {
+  addTask({ title, due, note, sourceId }) {
+    const source = this.sourceOf(sourceId || this.settings.get('defaultSourceId'));
+    if (!source) return null;
+
     const task = {
       id: `local:${crypto.randomUUID()}`,
+      sourceId: source.id,
+      category: source.label,
       title: title.trim(),
       done: false,
       due: due || null,
       note: note || '',
       doneAt: null,
-      category: category || this.settings.get('defaultCategory') || null,
-      source: source || '앱',
       url: null,
       lastEdited: new Date().toISOString(),
       pending: true,
     };
     this.tasks.unshift(task);
     this.outbox.push({
-      opId: crypto.randomUUID(), type: 'create', taskId: task.id,
-      payload: { title: task.title, due: task.due, note: task.note, category: task.category, source: task.source, done: false },
+      opId: crypto.randomUUID(),
+      type: 'create',
+      taskId: task.id,
+      sourceId: source.id,
+      payload: { title: task.title, due: task.due, note: task.note, done: false },
       tries: 0,
     });
     this._commit();
@@ -67,7 +83,7 @@ class SyncEngine {
     if (!task) return null;
 
     if (patch.done !== undefined) {
-      // 완료 시각은 앱이 남긴다. 이게 "언제 끝냈는지"의 기록이 된다.
+      // 완료 시각은 앱이 남긴다. DB 에 완료일시 속성이 없으면 노션 쪽은 그냥 생략된다.
       patch.doneAt = patch.done ? D.toNotionDateTime(new Date()) : null;
     }
 
@@ -85,7 +101,14 @@ class SyncEngine {
         // 아직 노션에 만들어지지도 않았다면 생성 내용 자체를 고친다.
         Object.assign(create.payload, patch);
       } else {
-        this.outbox.push({ opId: crypto.randomUUID(), type: 'update', taskId: id, patch: { ...patch }, tries: 0 });
+        this.outbox.push({
+          opId: crypto.randomUUID(),
+          type: 'update',
+          taskId: id,
+          sourceId: task.sourceId,
+          patch: { ...patch },
+          tries: 0,
+        });
       }
     }
     this._commit();
@@ -114,8 +137,14 @@ class SyncEngine {
     while (this.outbox.length) {
       const op = this.outbox[0];
       try {
+        const source = op.sourceId ? this.sourceOf(op.sourceId) : null;
+        if (op.type !== 'delete' && !source) {
+          throw new NotionError('이 항목이 속한 카테고리를 찾을 수 없습니다.', 400);
+        }
+        if (source && !this.client.hasSchema(source)) await this.client.loadSchema(source);
+
         if (op.type === 'create') {
-          const created = await this.client.createTask(op.payload);
+          const created = await this.client.createTask(source, op.payload);
           const local = this.findTask(op.taskId);
           if (local) Object.assign(local, created, { pending: false });
           // 뒤에 남은 작업들이 임시 ID 를 가리키고 있으면 진짜 ID 로 바꿔준다.
@@ -124,7 +153,7 @@ class SyncEngine {
           }
         } else if (op.type === 'update') {
           if (isLocalId(op.taskId)) throw new NotionError('아직 노션에 생성되지 않은 항목입니다.', 400);
-          const updated = await this.client.updateTask(op.taskId, op.patch);
+          const updated = await this.client.updateTask(source, op.taskId, op.patch);
           const local = this.findTask(op.taskId);
           if (local) Object.assign(local, updated, { pending: false });
         } else if (op.type === 'delete') {
@@ -152,44 +181,62 @@ class SyncEngine {
     return failures;
   }
 
-  /** 노션에서 오늘 기준 목록을 다시 받아 캐시를 맞춘다. */
+  /**
+   * 모든 카테고리에서 오늘 기준 목록을 받아 캐시를 맞춘다.
+   * 한 DB 가 실패해도 (통합 연결을 안 했다든지) 나머지는 그대로 불러온다.
+   */
   async pull() {
     const today = D.dateKey();
-    const [open, completed] = [
-      await this.client.queryOpenTasks({
-        today,
-        carryOverDays: this.settings.get('carryOverDays'),
-        includeNoDueDate: this.settings.get('includeNoDueDate'),
-      }),
-      await this.client.queryCompletedOn(today),
-    ];
+    const options = {
+      today,
+      carryOverDays: this.settings.get('carryOverDays'),
+      includeNoDueDate: this.settings.get('includeNoDueDate'),
+    };
 
     const remote = new Map();
-    for (const t of [...open, ...completed]) remote.set(t.id, t);
+    const failures = [];
+    const failedSources = new Set();
+    const liveSources = new Set(this.enabledSources.map((s) => s.id));
+
+    for (const source of this.enabledSources) {
+      try {
+        if (!this.client.hasSchema(source)) await this.client.loadSchema(source);
+        const open = await this.client.queryOpenTasks(source, options);
+        const completed = await this.client.queryCompletedOn(source, today);
+        for (const task of [...open, ...completed]) remote.set(task.id, task);
+      } catch (err) {
+        failures.push(`${source.label} — ${err.message}`);
+        failedSources.add(source.id);
+      }
+    }
 
     const pendingIds = new Set(this.outbox.map((op) => op.taskId));
     const next = [];
 
-    // 아직 노션에 못 올린 로컬 항목은 무조건 살린다.
-    for (const t of this.tasks) {
-      if (isLocalId(t.id) || pendingIds.has(t.id)) {
-        next.push(t);
-        remote.delete(t.id);
+    for (const task of this.tasks) {
+      const keepLocal = isLocalId(task.id) || pendingIds.has(task.id);
+      // 못 불러온 DB 의 항목은 지우지 않는다. 잠깐의 오류로 목록이 비면 곤란하다.
+      const sourceFailed = failedSources.has(task.sourceId);
+      // 꺼버린 카테고리의 항목은 화면에서 뺀다.
+      const stillEnabled = liveSources.has(task.sourceId);
+
+      if ((keepLocal || sourceFailed) && stillEnabled) {
+        next.push(task);
+        remote.delete(task.id);
       }
     }
-    for (const t of remote.values()) next.push(t);
+    for (const task of remote.values()) next.push(task);
 
     next.sort(sortTasks);
     this.cache.data.tasks = next;
     this.cache.data.lastSyncAt = new Date().toISOString();
     this._commit();
-    return { open: open.length, completed: completed.length };
+
+    return { count: next.length, failures };
   }
 
   async sync() {
     // 이미 돌고 있으면 겹쳐 돌리지 않는다. 대신 "끝나고 한 번 더" 표시만 남긴다.
-    // 항목을 연달아 체크하면 sync 가 그 횟수만큼 불리는데, 이 표시가 없으면
-    // 첫 번째 호출만 일하고 나머지 변경은 다음 주기(최대 5분)까지 묶여 있게 된다.
     if (this.status.syncing) {
       this.again = true;
       return this.status;
@@ -197,6 +244,11 @@ class SyncEngine {
 
     if (!this.client.configured) {
       this.status = { ...this.status, syncing: false, error: '노션 토큰을 먼저 설정해 주세요.' };
+      this.onChange();
+      return this.status;
+    }
+    if (!this.enabledSources.length) {
+      this.status = { ...this.status, syncing: false, error: '연결된 카테고리가 없습니다. 설정에서 추가해 주세요.' };
       this.onChange();
       return this.status;
     }
@@ -211,10 +263,10 @@ class SyncEngine {
       this.again = false;
       rounds += 1;
       try {
-        if (!this.client.schema) await this.client.loadSchema();
-        const failures = await this.push();
-        await this.pull();
-        error = failures.length ? `일부 항목 반영 실패 — ${failures[0]}` : null;
+        const pushFailures = await this.push();
+        const { failures } = await this.pull();
+        const all = [...pushFailures, ...failures];
+        error = all.length ? all[0] : null;
       } catch (err) {
         error = err.message;
         break;
@@ -232,7 +284,6 @@ function sortTasks(a, b) {
   if (a.done !== b.done) return a.done ? 1 : -1;
 
   if (a.done) {
-    // 방금 끝낸 것이 완료 목록 맨 위로 오는 편이 되짚어보기 좋다.
     if (a.doneAt && b.doneAt) return new Date(b.doneAt) - new Date(a.doneAt);
     if (a.doneAt) return -1;
     if (b.doneAt) return 1;

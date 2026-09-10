@@ -5,16 +5,13 @@ const D = require('./dates');
 const API = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
 
-/** 노션 DB 의 속성 이름. DB 에서 이름을 바꿨다면 여기만 고치면 된다. */
-const P = {
-  TITLE: '할 일',
-  DONE: '완료',
-  DUE: '마감일',
-  NOTE: '텍스트',
-  DONE_AT: '완료일시',
-  CATEGORY: '분류',
-  SOURCE: '출처',
-};
+/**
+ * 여러 노션 DB 를 한 화면에 모은다.
+ *
+ * DB 마다 속성 이름이 다르다 (할 일/이름, 완료/체크박스, 진행일시/날짜).
+ * 그래서 코드는 "논리 이름"만 알고, 실제 속성 이름은 설정의 source.props 에서 찾는다.
+ */
+const KEYS = ['title', 'done', 'due', 'note', 'doneAt'];
 
 class NotionError extends Error {
   constructor(message, status, code) {
@@ -22,7 +19,7 @@ class NotionError extends Error {
     this.name = 'NotionError';
     this.status = status;
     this.code = code;
-    // 토큰/권한/DB ID 문제는 재시도해도 소용없다.
+    // 토큰/권한/DB ID/속성 이름 문제는 재시도해도 소용없다.
     this.fatal = status === 400 || status === 401 || status === 403 || status === 404;
   }
 }
@@ -31,19 +28,18 @@ const plain = (rich) => (Array.isArray(rich) ? rich.map((r) => r.plain_text).joi
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class NotionClient {
-  constructor({ token, databaseId }) {
+  constructor({ token }) {
     this.token = token;
-    this.databaseId = databaseId;
-    this.schema = null;       // 실제 DB 에 존재하는 속성 이름 Set
+    this.schemas = new Map();   // sourceId -> Set(속성 이름)
     this._chain = Promise.resolve();
     this._lastCall = 0;
   }
 
   get configured() {
-    return Boolean(this.token && this.databaseId);
+    return Boolean(this.token);
   }
 
-  /** 노션은 초당 약 3회 제한이 있어 호출을 한 줄로 세우고 최소 간격을 준다. */
+  /** 노션은 초당 약 3회 제한이 있다. DB 가 여러 개여도 큐는 하나로 공유한다. */
   _queue(fn) {
     const run = this._chain.then(async () => {
       const gap = Date.now() - this._lastCall;
@@ -74,7 +70,6 @@ class NotionClient {
           body: body ? JSON.stringify(body) : undefined,
         });
       } catch (err) {
-        // 네트워크가 끊긴 경우. 재시도 대상.
         throw new NotionError(`네트워크 오류: ${err.message}`, 0);
       }
 
@@ -89,7 +84,6 @@ class NotionClient {
       const text = await res.text();
 
       // 사내 프록시나 방화벽이 중간에서 HTML 오류 페이지를 돌려주는 경우가 있다.
-      // 그대로 JSON.parse 하면 엉뚱한 SyntaxError 가 나서 원인을 알 수 없게 된다.
       let json = {};
       if (text) {
         try {
@@ -113,27 +107,63 @@ class NotionClient {
     });
   }
 
-  /** DB 스키마를 읽어 어떤 속성이 실제로 있는지 기억해 둔다. */
-  async loadSchema() {
-    const db = await this.request('GET', `/databases/${this.databaseId}`);
-    this.schema = new Set(Object.keys(db.properties || {}));
+  // ── 스키마 ────────────────────────────────────────────────
+
+  /** DB 를 읽어 어떤 속성이 실제로 있는지 기억해 둔다. */
+  async loadSchema(source) {
+    const db = await this.request('GET', `/databases/${source.databaseId}`);
+    const names = new Set(Object.keys(db.properties || {}));
+    this.schemas.set(source.id, names);
+
+    const missing = KEYS
+      .filter((key) => source.props[key])
+      .filter((key) => !names.has(source.props[key]))
+      .map((key) => `${key}=${source.props[key]}`);
+
+    // 제목 속성은 이름이 무엇이든 반드시 하나 있으므로 자동으로 찾아준다.
+    const titleName = Object.keys(db.properties || {})
+      .find((name) => db.properties[name].type === 'title');
+
     return {
       title: plain(db.title),
-      properties: [...this.schema],
-      missing: Object.values(P).filter((name) => !this.schema.has(name)),
+      properties: [...names],
+      titleProperty: titleName || null,
+      missing,
     };
   }
 
-  has(prop) {
-    // 스키마를 아직 못 읽었으면 일단 있다고 보고 시도한다.
-    return !this.schema || this.schema.has(prop);
+  hasSchema(source) {
+    return this.schemas.has(source.id);
   }
 
-  async _queryAll(filter, sorts) {
+  /** 논리 이름 -> 실제 노션 속성 이름. 설정에 없거나 DB 에 없으면 null. */
+  prop(source, key) {
+    const name = source.props ? source.props[key] : null;
+    if (!name) return null;
+    const schema = this.schemas.get(source.id);
+    if (schema && !schema.has(name)) return null;
+    return name;
+  }
+
+  /** 필수 속성이 없으면 조회 자체가 불가능하다. 미리 알려준다. */
+  _require(source, key) {
+    const name = this.prop(source, key);
+    if (!name) {
+      throw new NotionError(
+        `"${source.label}" 에 ${key} 속성이 설정되어 있지 않습니다. 설정에서 속성 이름을 확인해 주세요.`,
+        400,
+      );
+    }
+    return name;
+  }
+
+  // ── 조회 ──────────────────────────────────────────────────
+
+  async _queryAll(source, filter, sorts) {
     const results = [];
     let cursor;
     do {
-      const page = await this.request('POST', `/databases/${this.databaseId}/query`, {
+      const page = await this.request('POST', `/databases/${source.databaseId}/query`, {
         filter,
         sorts,
         page_size: 100,
@@ -142,37 +172,38 @@ class NotionClient {
       results.push(...page.results);
       cursor = page.has_more ? page.next_cursor : null;
     } while (cursor);
-    return results.map((p) => this.toTask(p));
+    return results.map((p) => this.toTask(source, p));
   }
 
   /**
-   * 오늘 처리해야 할 미완료 항목:
-   *  - 마감일이 오늘이거나 지난 것 (carryOverDays 만큼만 거슬러 올라간다)
-   *  - 마감일이 비어 있고 최근에 만들어진 것 (선택)
+   * 오늘 처리해야 할 미완료 항목.
+   *
+   * 노션 복합 필터는 두 단계까지만 중첩된다. and 안의 or 안에 다시 and 를 넣으면
+   * 400 "body failed validation" 이 돌아온다. 그래서 평평한 질의를 두 번 던지고 합친다.
    */
-  async queryOpenTasks({ today, carryOverDays, includeNoDueDate }) {
-    const notDone = { property: P.DONE, checkbox: { equals: false } };
+  async queryOpenTasks(source, { today, carryOverDays, includeNoDueDate }) {
+    const doneName = this._require(source, 'done');
+    const dueName = this._require(source, 'due');
+    const notDone = { property: doneName, checkbox: { equals: false } };
 
-    // 노션 복합 필터는 두 단계까지만 중첩된다. and 안의 or 안에 다시 and 를 넣으면
-    // 400 "body failed validation" 이 돌아온다. 그래서 하나의 or 로 묶는 대신
-    // 평평한 질의를 두 번 던지고 여기서 합친다. 호출이 한 번 늘 뿐이다.
-    const dated = [notDone, { property: P.DUE, date: { on_or_before: today } }];
+    const dated = [notDone, { property: dueName, date: { on_or_before: today } }];
     if (carryOverDays > 0) {
-      dated.push({ property: P.DUE, date: { on_or_after: D.addDays(today, -carryOverDays) } });
+      dated.push({ property: dueName, date: { on_or_after: D.addDays(today, -carryOverDays) } });
     }
 
     const tasks = await this._queryAll(
+      source,
       { and: dated },
-      [{ property: P.DUE, direction: 'ascending' }],
+      [{ property: dueName, direction: 'ascending' }],
     );
 
     if (!includeNoDueDate) return tasks;
 
     const since = D.toNotionDateTime(D.atTime(D.addDays(today, -(carryOverDays || 30)), '00:00'));
-    const undated = await this._queryAll({
+    const undated = await this._queryAll(source, {
       and: [
         notDone,
-        { property: P.DUE, date: { is_empty: true } },
+        { property: dueName, date: { is_empty: true } },
         { timestamp: 'created_time', created_time: { on_or_after: since } },
       ],
     });
@@ -184,70 +215,87 @@ class NotionClient {
     return tasks;
   }
 
-  /** 해당 날짜에 완료 처리한 항목. 완료일시가 없는 DB 면 마감일로 대신 찾는다. */
-  async queryCompletedOn(today) {
-    const doneFilter = { property: P.DONE, checkbox: { equals: true } };
+  /** 해당 날짜에 완료한 항목. 완료일시 속성이 없으면 마감일로 대신 찾는다. */
+  async queryCompletedOn(source, today) {
+    const doneName = this._require(source, 'done');
+    const isDone = { property: doneName, checkbox: { equals: true } };
+    const doneAtName = this.prop(source, 'doneAt');
 
-    if (this.has(P.DONE_AT)) {
+    if (doneAtName) {
       const from = D.toNotionDateTime(D.atTime(today, '00:00'));
       const to = D.toNotionDateTime(D.atTime(D.addDays(today, 1), '00:00'));
-      return this._queryAll({
-        and: [doneFilter, { property: P.DONE_AT, date: { on_or_after: from } }, { property: P.DONE_AT, date: { before: to } }],
+      return this._queryAll(source, {
+        and: [
+          isDone,
+          { property: doneAtName, date: { on_or_after: from } },
+          { property: doneAtName, date: { before: to } },
+        ],
       });
     }
 
-    return this._queryAll({
-      and: [doneFilter, { property: P.DUE, date: { equals: today } }],
+    const dueName = this._require(source, 'due');
+    return this._queryAll(source, {
+      and: [isDone, { property: dueName, date: { equals: today } }],
     });
   }
 
+  // ── 변환 ──────────────────────────────────────────────────
+
   /** 노션 page -> 앱에서 쓰는 할 일 객체 */
-  toTask(page) {
+  toTask(source, page) {
     const props = page.properties || {};
+    const get = (key) => {
+      const name = source.props ? source.props[key] : null;
+      return name ? props[name] : undefined;
+    };
+
     return {
       id: page.id,
-      title: plain(props[P.TITLE]?.title) || '(제목 없음)',
-      done: props[P.DONE]?.checkbox === true,
-      due: props[P.DUE]?.date?.start ?? null,
-      note: plain(props[P.NOTE]?.rich_text),
-      doneAt: props[P.DONE_AT]?.date?.start ?? null,
-      category: props[P.CATEGORY]?.select?.name ?? null,
-      source: props[P.SOURCE]?.select?.name ?? null,
+      sourceId: source.id,
+      category: source.label,
+      title: plain(get('title')?.title) || '(제목 없음)',
+      done: get('done')?.checkbox === true,
+      due: get('due')?.date?.start ?? null,
+      note: plain(get('note')?.rich_text),
+      doneAt: get('doneAt')?.date?.start ?? null,
       url: page.url,
       lastEdited: page.last_edited_time,
       pending: false,
     };
   }
 
-  /** 앱 필드 -> 노션 properties. DB 에 없는 속성은 조용히 건너뛴다. */
-  buildProperties(patch) {
+  /** 앱 필드 -> 노션 properties. 설정에 없거나 DB 에 없는 속성은 조용히 건너뛴다. */
+  buildProperties(source, patch) {
     const out = {};
-    const put = (name, value) => { if (this.has(name)) out[name] = value; };
+    const put = (key, value) => {
+      const name = this.prop(source, key);
+      if (name) out[name] = value;
+    };
 
-    if (patch.title !== undefined) put(P.TITLE, { title: [{ text: { content: patch.title.slice(0, 2000) } }] });
-    if (patch.done !== undefined) put(P.DONE, { checkbox: Boolean(patch.done) });
-    if (patch.note !== undefined) put(P.NOTE, { rich_text: patch.note ? [{ text: { content: patch.note.slice(0, 2000) } }] : [] });
-    if (patch.due !== undefined) put(P.DUE, { date: patch.due ? { start: patch.due } : null });
-    if (patch.doneAt !== undefined) put(P.DONE_AT, { date: patch.doneAt ? { start: patch.doneAt } : null });
-    if (patch.category !== undefined) put(P.CATEGORY, { select: patch.category ? { name: patch.category } : null });
-    if (patch.source !== undefined) put(P.SOURCE, { select: patch.source ? { name: patch.source } : null });
+    if (patch.title !== undefined) put('title', { title: [{ text: { content: patch.title.slice(0, 2000) } }] });
+    if (patch.done !== undefined) put('done', { checkbox: Boolean(patch.done) });
+    if (patch.note !== undefined) put('note', { rich_text: patch.note ? [{ text: { content: patch.note.slice(0, 2000) } }] : [] });
+    if (patch.due !== undefined) put('due', { date: patch.due ? { start: patch.due } : null });
+    if (patch.doneAt !== undefined) put('doneAt', { date: patch.doneAt ? { start: patch.doneAt } : null });
 
     return out;
   }
 
-  async createTask(payload) {
+  // ── 쓰기 ──────────────────────────────────────────────────
+
+  async createTask(source, payload) {
     const page = await this.request('POST', '/pages', {
-      parent: { database_id: this.databaseId },
-      properties: this.buildProperties(payload),
+      parent: { database_id: source.databaseId },
+      properties: this.buildProperties(source, payload),
     });
-    return this.toTask(page);
+    return this.toTask(source, page);
   }
 
-  async updateTask(pageId, patch) {
+  async updateTask(source, pageId, patch) {
     const page = await this.request('PATCH', `/pages/${pageId}`, {
-      properties: this.buildProperties(patch),
+      properties: this.buildProperties(source, patch),
     });
-    return this.toTask(page);
+    return this.toTask(source, page);
   }
 
   async archiveTask(pageId) {
@@ -255,4 +303,4 @@ class NotionClient {
   }
 }
 
-module.exports = { NotionClient, NotionError, P };
+module.exports = { NotionClient, NotionError, KEYS };

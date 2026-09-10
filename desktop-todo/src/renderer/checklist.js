@@ -6,7 +6,8 @@ const pad = (n) => String(n).padStart(2, '0');
 const el = {
   date: $('dateLabel'), list: $('list'),
   fill: $('progressFill'), progress: $('progressText'), pct: $('progressPct'),
-  title: $('newTitle'), time: $('newTime'), category: $('newCategory'), add: $('addBtn'),
+  title: $('newTitle'), time: $('newTime'), source: $('newSource'), add: $('addBtn'),
+  tabs: $('tabs'),
   sync: $('syncBtn'), settings: $('settingsBtn'), hide: $('hideBtn'),
   status: $('statusText'), pending: $('pendingText'),
 };
@@ -14,6 +15,7 @@ const el = {
 let state = null;
 let completedOpen = false;   // 완료 섹션 펼침 여부. 창을 새로 열면 다시 접힌다.
 let editingId = null;        // 지금 수정 중인 항목. 편집 중에는 다시 그리지 않는다.
+let activeSource = 'all';    // 지금 보고 있는 카테고리 ('all' 이면 전부)
 
 // ── 날짜 헬퍼 (main 쪽 dates.js 의 화면용 최소 버전) ──────────
 
@@ -111,8 +113,13 @@ function renderTask(task, today) {
     const soon = !task.done && due - Date.now() < 60 * 60 * 1000 && due > Date.now();
     meta.appendChild(makeTag(t, soon ? 'soon' : ''));
   }
-  if (task.category) meta.appendChild(makeTag(task.category));
-  if (task.source === '루틴') meta.appendChild(makeTag('루틴', 'routine'));
+  // 카테고리는 '전체' 탭에서만 보여준다. 한 카테고리만 보고 있으면 군더더기다.
+  const source = sourceOf(task.sourceId);
+  if (source && activeSource === 'all') {
+    const tag = makeTag(source.label, `cat cat-${source.color || 'gray'}`);
+    tag.prepend(categoryDot(source));
+    meta.appendChild(tag);
+  }
   if (task.done && task.doneAt) meta.appendChild(makeTag(`${timeLabel(task.doneAt) || ''} 완료`.trim()));
   if (task.pending) meta.appendChild(makeTag('동기화 대기', 'pending'));
   if (task.note) {
@@ -128,7 +135,7 @@ function renderTask(task, today) {
   const edit = document.createElement('button');
   edit.className = 'rowbtn';
   edit.textContent = '✎';
-  edit.title = '수정 (제목·시각·분류·메모)';
+  edit.title = '수정 (제목·마감·메모)';
   edit.addEventListener('click', () => startEdit(task.id));
   btns.appendChild(edit);
 
@@ -169,7 +176,63 @@ function renderGroup(label, tasks, today, cls) {
 
 const hideCompleted = () => Boolean(state && state.settings.hideCompleted);
 
-const CATEGORIES = ['스터디', '업무', '환자', '연구', '개인'];
+const sources = () => (state && state.sources ? state.sources.filter((s) => s.enabled !== false) : []);
+const sourceOf = (id) => sources().find((s) => s.id === id) || null;
+
+function categoryDot(source) {
+  const dot = document.createElement('span');
+  dot.className = `dot cat-${(source && source.color) || 'gray'}`;
+  return dot;
+}
+
+/** 카테고리 탭. 숫자는 그 카테고리에 남은(미완료) 개수다. */
+function renderTabs() {
+  el.tabs.replaceChildren();
+  const list = sources();
+  if (list.length < 2) return;          // 카테고리가 하나뿐이면 탭이 의미 없다
+
+  const make = (id, label, count, source) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = id === activeSource ? 'tab active' : 'tab';
+    if (source) tab.appendChild(categoryDot(source));
+    tab.append(document.createTextNode(label));
+
+    const badge = document.createElement('span');
+    badge.className = 'count';
+    badge.textContent = String(count);
+    tab.appendChild(badge);
+
+    tab.addEventListener('click', () => { activeSource = id; render({ force: true }); });
+    return tab;
+  };
+
+  const open = state.tasks.filter((t) => !t.done);
+  el.tabs.appendChild(make('all', '전체', open.length, null));
+  for (const source of list) {
+    el.tabs.appendChild(make(source.id, source.label, open.filter((t) => t.sourceId === source.id).length, source));
+  }
+}
+
+/** '추가' 가 어느 카테고리로 갈지 고르는 드롭다운을 채운다. */
+function fillSourceSelect() {
+  const list = sources();
+  const current = el.source.value;
+  el.source.replaceChildren();
+
+  for (const source of list) {
+    const option = document.createElement('option');
+    option.value = source.id;
+    option.textContent = source.label;
+    el.source.appendChild(option);
+  }
+
+  // 탭에서 카테고리를 고르면 추가도 그쪽으로 맞춰준다.
+  const preferred = (activeSource !== 'all' && list.some((s) => s.id === activeSource))
+    ? activeSource
+    : (current || state.settings.defaultSourceId || (list[0] && list[0].id));
+  if (preferred) el.source.value = preferred;
+}
 
 function startEdit(id) {
   editingId = id;
@@ -203,19 +266,21 @@ function renderEditor(task) {
   const time = field('time', timeLabel(task.due) || '');
   const note = field('text', task.note, '메모 (선택)');
 
-  const category = document.createElement('select');
-  category.className = 'field';
-  for (const name of ['', ...CATEGORIES]) {
-    const option = document.createElement('option');
-    option.value = name;
-    option.textContent = name || '분류 없음';
-    category.appendChild(option);
+  // 카테고리는 노션 DB 자체라 앱에서 옮길 수 없다. 어디 소속인지만 보여준다.
+  const source = sourceOf(task.sourceId);
+  const cat = document.createElement('div');
+  cat.className = 'editor-cat';
+  cat.title = '카테고리는 노션 데이터베이스라 앱에서 옮길 수 없습니다';
+  if (source) {
+    cat.appendChild(categoryDot(source));
+    cat.append(document.createTextNode(source.label));
+  } else {
+    cat.append(document.createTextNode('카테고리 없음'));
   }
-  category.value = task.category || '';
 
   const when = document.createElement('div');
   when.className = 'editor-row';
-  when.append(date, time, category);
+  when.append(date, time, cat);
 
   const save = document.createElement('button');
   save.type = 'submit';
@@ -254,7 +319,6 @@ function renderEditor(task) {
     window.todo.patchTask(task.id, {
       title: next,
       due: window.TodoUtil.buildDue(date.value, time.value),
-      category: category.value || null,
       note: note.value.trim(),
     });
     render({ force: true });
@@ -309,13 +373,19 @@ function render({ force = false } = {}) {
   // 동기화가 5분마다 도는 앱이라 이 가드가 없으면 실제로 겪게 된다.
   if (editingId && !force) return;
 
-  const { tasks, today, status } = state;
+  const { today, status } = state;
 
   el.date.textContent = humanDate(today);
+  renderTabs();
+  fillSourceSelect();
+
+  // 고른 카테고리만 본다. 퍼센트도 지금 보고 있는 것 기준으로 센다.
+  const tasks = activeSource === 'all'
+    ? state.tasks
+    : state.tasks.filter((t) => t.sourceId === activeSource);
 
   const g = groupTasks(tasks, today);
   const open = tasks.filter((t) => !t.done);
-  const done = tasks.filter((t) => t.done);
   const total = tasks.length;
 
   // 완료율의 분모는 "마감일이 오늘인 항목"뿐이다.
@@ -345,10 +415,15 @@ function render({ force = false } = {}) {
   el.list.replaceChildren();
 
   if (!total) {
+    const here = activeSource === 'all' ? null : sourceOf(activeSource);
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.innerHTML = '<span class="big">🗒️</span>';
-    empty.append(document.createTextNode('오늘 할 일이 비어 있습니다.'));
+    const big = document.createElement('span');
+    big.className = 'big';
+    big.textContent = '🗒️';
+    empty.appendChild(big);
+    empty.append(document.createTextNode(
+      here ? `${here.label} 에는 오늘 할 일이 없습니다.` : '오늘 할 일이 비어 있습니다.'));
     empty.appendChild(document.createElement('br'));
     empty.append(document.createTextNode('위에 입력하면 노션에도 함께 기록됩니다.'));
     el.list.appendChild(empty);
@@ -398,7 +473,7 @@ function submit() {
   const today = state ? state.today : dateKey();
   const due = window.TodoUtil.buildDue(today, el.time.value);
 
-  window.todo.addTask({ title, due, category: el.category.value || null });
+  window.todo.addTask({ title, due, sourceId: el.source.value || null });
   el.title.value = '';
   el.time.value = '';
   el.title.focus();
@@ -414,7 +489,6 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.tod
 window.todo.onState((data) => { state = data; render(); });
 window.todo.getState().then((data) => {
   state = data;
-  if (data.settings.defaultCategory) el.category.value = data.settings.defaultCategory;
   render();
 });
 

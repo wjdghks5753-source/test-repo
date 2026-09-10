@@ -31,15 +31,24 @@
         <input class="field" id="notionToken" type="password" placeholder="ntn_… (저장하면 다시 표시되지 않습니다)" />
       </label>
 
-      <label class="row">
-        <span>데이터베이스 ID</span>
-        <input class="field" id="databaseId" placeholder="2c48143c-2e66-8067-9c75-cd40794671d7" />
-      </label>
+    </section>
+
+    <section class="card">
+      <h2>카테고리</h2>
+      <p class="hint">
+        카테고리 하나가 노션 데이터베이스 하나입니다. 데이터베이스마다 속성 이름이 다르므로
+        (<code>할 일</code> / <code>이름</code>, <code>완료</code> / <code>체크박스</code>)
+        아래에서 각각 맞춰 줍니다. <b>비워 둔 속성은 그 기능만 생략</b>되고 나머지는 그대로 동작합니다.
+        각 데이터베이스에도 <b>··· &gt; 연결</b>에서 통합을 추가해야 접근이 열립니다.
+      </p>
+
+      <div id="sourceList" class="sources"></div>
 
       <div class="row btns">
+        <button class="btn" id="addSourceBtn">카테고리 추가</button>
         <button class="btn" id="testBtn">연결 테스트</button>
-        <span class="result" id="testResult"></span>
       </div>
+      <div class="result" id="testResult"></div>
     </section>
 
     <section class="card">
@@ -104,15 +113,8 @@
         <span>항상 다른 창 위에 표시</span>
       </label>
       <label class="row">
-        <span>기본 분류</span>
-        <select class="field" id="defaultCategory">
-          <option value="">분류 없음</option>
-          <option>스터디</option>
-          <option>업무</option>
-          <option>환자</option>
-          <option>연구</option>
-          <option>개인</option>
-        </select>
+        <span>기본 카테고리</span>
+        <select class="field" id="defaultSourceId"></select>
       </label>
     </section>
 
@@ -127,14 +129,7 @@
         <div class="weekdays" id="weekdays"></div>
         <div class="row btns">
           <input class="field time" id="routineTime" type="time" title="시각 (비워두면 종일)" />
-          <select class="field" id="routineCategory">
-            <option value="">분류 없음</option>
-            <option>스터디</option>
-            <option>업무</option>
-            <option>환자</option>
-            <option>연구</option>
-            <option>개인</option>
-          </select>
+          <select class="field" id="routineSource"></select>
           <button class="btn primary" id="addRoutineBtn">추가</button>
         </div>
       </div>
