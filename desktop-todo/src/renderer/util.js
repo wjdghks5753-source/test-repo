@@ -27,6 +27,56 @@
     return percent;
   }
 
+  /** 노션 date 문자열 -> 로컬 'YYYY-MM-DD' (시간이 있으면 로컬 시간대로 환산) */
+  function dateKeyOf(value) {
+    if (!value) return null;
+    if (!value.includes('T')) return value.slice(0, 10);
+    const d = new Date(value);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  /**
+   * 오늘치 집계.
+   *
+   * 완료율의 분모는 "마감일이 오늘인 항목"뿐이다.
+   * 몇 달 밀린 걸 오늘 한꺼번에 정리하면 그건 오늘의 몫이 아닌데도
+   * 분모에 들어가 98%, 100% 같은 무의미한 숫자를 만든다.
+   * 그렇게 처리한 건들은 따로 세서 '그 외 오늘 처리'로 보여준다.
+   */
+  function todayStats(tasks, today) {
+    let dueToday = 0;      // 마감일이 오늘인 항목
+    let doneToday = 0;     // 그중 끝낸 것
+    let otherDone = 0;     // 오늘 체크했지만 마감일은 오늘이 아니던 것
+    let overdue = 0;       // 마감일이 지났는데 아직 미완료
+    let open = 0;          // 전체 미완료
+
+    for (const task of tasks || []) {
+      const due = dateKeyOf(task.due);
+
+      if (due === today) {
+        dueToday += 1;
+        if (task.done) doneToday += 1;
+      } else if (task.done && dateKeyOf(task.doneAt) === today) {
+        otherDone += 1;
+      }
+
+      if (!task.done) {
+        open += 1;
+        if (due && due < today) overdue += 1;
+      }
+    }
+
+    return {
+      dueToday,
+      doneToday,
+      otherDone,
+      overdue,
+      open,
+      percent: completionPercent(doneToday, dueToday),
+      cleared: dueToday > 0 && doneToday === dueToday,
+    };
+  }
+
   /** 날짜/시각 입력값 -> 노션 date 속성에 넣을 문자열 */
   function buildDue(dateStr, timeStr) {
     if (!dateStr) return null;              // 마감일 없음
@@ -49,5 +99,5 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
-  return { completionPercent, buildDue, shiftDate, ROUND_UP_FROM };
+  return { completionPercent, todayStats, dateKeyOf, buildDue, shiftDate, ROUND_UP_FROM };
 }));

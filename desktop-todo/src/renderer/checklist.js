@@ -318,21 +318,27 @@ function render({ force = false } = {}) {
   const done = tasks.filter((t) => t.done);
   const total = tasks.length;
 
-  // 완료율은 항목 개수 기준. 99% 이상이면 100%로 올려 보여준다.
-  const percent = window.TodoUtil.completionPercent(done.length, total);
-  const allDone = total > 0 && !open.length;
+  // 완료율의 분모는 "마감일이 오늘인 항목"뿐이다.
+  // 몇 달 밀린 걸 오늘 정리했다고 오늘 몫을 다 한 것은 아니다.
+  const stats = window.TodoUtil.todayStats(tasks, today);
 
-  el.pct.textContent = total ? `${percent}%` : '—';
-  el.pct.classList.toggle('full', allDone);
-  el.fill.style.width = `${percent}%`;
-  el.fill.classList.toggle('full', allDone);
+  el.pct.textContent = stats.dueToday ? `${stats.percent}%` : '—';
+  el.pct.title = '마감일이 오늘인 항목 기준';
+  el.pct.classList.toggle('full', stats.cleared);
+  el.fill.style.width = `${stats.percent}%`;
+  el.fill.classList.toggle('full', stats.cleared);
 
   if (!total) {
     el.progress.textContent = '오늘 등록된 할 일이 없습니다';
+  } else if (!stats.dueToday) {
+    const parts = ['오늘 마감인 항목 없음'];
+    if (stats.open) parts.push(`남은 ${stats.open}건`);
+    if (stats.otherDone) parts.push(`오늘 처리 ${stats.otherDone}건`);
+    el.progress.textContent = parts.join(' · ');
   } else {
-    const parts = [`${done.length} / ${total} 완료`];
-    if (open.length) parts.push(`남은 ${open.length}건`);
-    if (g.overdue.length) parts.push(`지연 ${g.overdue.length}건`);
+    const parts = [`오늘 ${stats.doneToday} / ${stats.dueToday} 완료`];
+    if (stats.overdue) parts.push(`지연 ${stats.overdue}건`);
+    if (stats.otherDone) parts.push(`그 외 오늘 처리 ${stats.otherDone}건`);
     el.progress.textContent = parts.join(' · ');
   }
 
