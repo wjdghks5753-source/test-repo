@@ -239,7 +239,22 @@
   color: var(--muted);
 }
 
-.statusbar .err { color: var(--danger); }
+.statusbar .err { color: var(--danger); cursor: help; }
+
+/*
+ * 오류 메시지는 반드시 한 줄로 묶어둔다.
+ * 노션의 검증 오류는 수백 자짜리라, 줄바꿈을 허용하면 상태줄이 창 전체를
+ * 밀어내고 정작 할 일 목록이 화면 밖으로 사라진다.
+ */
+.statusbar #statusText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar #pendingText { flex: none; }
 
 /* ── 그 자리에서 수정하기 ─────────────────────────────── */
 

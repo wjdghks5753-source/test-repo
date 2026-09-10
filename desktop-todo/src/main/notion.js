@@ -104,7 +104,10 @@ class NotionClient {
       }
 
       if (!res.ok) {
-        throw new NotionError(json.message || `노션 오류 (HTTP ${res.status})`, res.status, json.code);
+        // 노션의 검증 오류는 수백 자에 달한다. 화면에 그대로 흘리면 목록을 덮어버린다.
+        const detail = json.message || `노션 오류 (HTTP ${res.status})`;
+        const short = detail.length > 180 ? `${detail.slice(0, 180)}…` : detail;
+        throw new NotionError(short, res.status, json.code);
       }
       return json;
     });

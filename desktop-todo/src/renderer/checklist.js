@@ -378,6 +378,7 @@ function render({ force = false } = {}) {
 
   el.sync.classList.toggle('spin', Boolean(status.syncing));
   el.status.textContent = status.error || relativeTime(status.lastSyncAt);
+  el.status.title = status.error || '';   // 잘린 오류 전문은 마우스를 올리면 보인다
   el.status.classList.toggle('err', Boolean(status.error));
   el.pending.textContent = state.outboxCount ? `대기 ${state.outboxCount}건` : '';
 }
