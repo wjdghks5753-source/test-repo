@@ -2,12 +2,13 @@
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
+const U = () => window.TodoUtil;
 
 const el = {
-  date: $('dateLabel'), list: $('list'),
-  fill: $('progressFill'), progress: $('progressText'), pct: $('progressPct'),
-  title: $('newTitle'), time: $('newTime'), source: $('newSource'), add: $('addBtn'),
-  tabs: $('tabs'),
+  date: $('dateLabel'), list: $('list'), tabs: $('tabs'),
+  fill: $('progressFill'), pct: $('progressPct'), progress: $('progressText'),
+  next: $('nextUp'), nextWhen: $('nextUpWhen'), nextTime: $('nextUpTime'), nextTitle: $('nextUpTitle'),
+  title: $('newTitle'), time: $('newTime'), source: $('newSource'),
   sync: $('syncBtn'), settings: $('settingsBtn'), hide: $('hideBtn'),
   status: $('statusText'), pending: $('pendingText'),
 };
@@ -17,7 +18,7 @@ let completedOpen = false;   // 완료 섹션 펼침 여부. 창을 새로 열�
 let editingId = null;        // 지금 수정 중인 항목. 편집 중에는 다시 그리지 않는다.
 let activeSource = 'all';    // 지금 보고 있는 카테고리 ('all' 이면 전부)
 
-// ── 날짜 헬퍼 (main 쪽 dates.js 의 화면용 최소 버전) ──────────
+// ── 날짜 헬퍼 ────────────────────────────────────────────────
 
 const dateKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hasTime = (v) => typeof v === 'string' && v.includes('T');
@@ -28,10 +29,15 @@ const timeLabel = (v) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-function humanDate(key) {
+const WEEK_LONG = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+const WEEK_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
+
+function humanDate(key, long = false) {
   const d = new Date(`${key}T00:00:00`);
-  const w = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${w})`;
+  const w = (long ? WEEK_LONG : WEEK_SHORT)[d.getDay()];
+  return long
+    ? `${d.getMonth() + 1}월 ${d.getDate()}일 ${w}`
+    : `${d.getMonth() + 1}월 ${d.getDate()}일 (${w})`;
 }
 
 function relativeTime(iso) {
@@ -43,145 +49,16 @@ function relativeTime(iso) {
   return `${Math.floor(secs / 86400)}일 전 동기화`;
 }
 
-// ── 렌더 ──────────────────────────────────────────────────────
-
-function groupTasks(tasks, today) {
-  const groups = { overdue: [], today: [], undated: [], done: [] };
-  for (const t of tasks) {
-    if (t.done) { groups.done.push(t); continue; }
-    const k = dueKey(t.due);
-    if (!k) groups.undated.push(t);
-    else if (k < today) groups.overdue.push(t);
-    else groups.today.push(t);
-  }
-  return groups;
-}
-
-function makeTag(text, cls) {
-  const span = document.createElement('span');
-  span.className = cls ? `tag ${cls}` : 'tag';
-  span.textContent = text;
-  return span;
-}
-
-function renderTask(task, today) {
-  const row = document.createElement('div');
-  row.className = task.done ? 'task done' : 'task';
-
-  const check = document.createElement('button');
-  check.className = 'check';
-  check.textContent = '✓';
-  check.title = task.done ? '완료 취소' : '완료 처리';
-  check.setAttribute('aria-pressed', String(task.done));
-  check.addEventListener('click', () => {
-    if (row.classList.contains('leaving')) return;   // 연타 방지
-
-    const next = !task.done;
-    const willVanish = next && hideCompleted() && !completedOpen;
-
-    if (willVanish) {
-      // 목록에서 빠지는 게 보이도록 애니메이션을 먼저 보여주고,
-      // 그 뒤에 상태를 바꾼다. patchTask 가 곧바로 다시 그리기 때문이다.
-      row.classList.add('leaving');
-      setTimeout(() => window.todo.patchTask(task.id, { done: true }), 240);
-      return;
-    }
-
-    row.classList.toggle('done');           // 응답을 기다리지 않고 바로 반응
-    window.todo.patchTask(task.id, { done: next });
-  });
-
-  const body = document.createElement('div');
-  body.className = 'body';
-
-  const title = document.createElement('div');
-  title.className = 'title';
-  title.textContent = task.title;           // textContent — 노션 내용이 HTML 로 해석되지 않게
-  title.title = '눌러서 수정';
-  title.addEventListener('click', () => startEdit(task.id));
-  body.appendChild(title);
-
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-
-  const k = dueKey(task.due);
-  const t = timeLabel(task.due);
-  if (k && k < today) {
-    meta.appendChild(makeTag(`${humanDate(k)} 지연`, 'late'));
-  } else if (t) {
-    const due = new Date(task.due);
-    const soon = !task.done && due - Date.now() < 60 * 60 * 1000 && due > Date.now();
-    meta.appendChild(makeTag(t, soon ? 'soon' : ''));
-  }
-  // 카테고리는 '전체' 탭에서만 보여준다. 한 카테고리만 보고 있으면 군더더기다.
-  const source = sourceOf(task.sourceId);
-  if (source && activeSource === 'all') {
-    const tag = makeTag(source.label, `cat cat-${source.color || 'gray'}`);
-    tag.prepend(categoryDot(source));
-    meta.appendChild(tag);
-  }
-  if (task.done && task.doneAt) meta.appendChild(makeTag(`${timeLabel(task.doneAt) || ''} 완료`.trim()));
-  if (task.pending) meta.appendChild(makeTag('동기화 대기', 'pending'));
-  if (task.note) {
-    const note = document.createElement('span');
-    note.textContent = task.note.replace(/\s+/g, ' ').slice(0, 60);
-    meta.appendChild(note);
-  }
-  if (meta.childElementCount) body.appendChild(meta);
-
-  const btns = document.createElement('div');
-  btns.className = 'rowbtns';
-
-  const edit = document.createElement('button');
-  edit.className = 'rowbtn';
-  edit.textContent = '✎';
-  edit.title = '수정 (제목·마감·메모)';
-  edit.addEventListener('click', () => startEdit(task.id));
-  btns.appendChild(edit);
-
-  if (task.url) {
-    const open = document.createElement('button');
-    open.className = 'rowbtn';
-    open.textContent = '↗';
-    open.title = '노션에서 열기';
-    open.addEventListener('click', () => window.todo.openExternal(task.url));
-    btns.appendChild(open);
-  }
-
-  const del = document.createElement('button');
-  del.className = 'rowbtn del';
-  del.textContent = '🗑';
-  del.title = '삭제 (노션에서 보관 처리)';
-  del.addEventListener('click', () => {
-    if (confirm(`"${task.title}" 을(를) 삭제할까요?\n노션에서는 휴지통으로 이동합니다.`)) {
-      window.todo.deleteTask(task.id);
-    }
-  });
-  btns.appendChild(del);
-
-  row.append(check, body, btns);
-  return row;
-}
-
-function renderGroup(label, tasks, today, cls) {
-  if (!tasks.length) return null;
-  const frag = document.createDocumentFragment();
-  const head = document.createElement('div');
-  head.className = cls ? `group-title ${cls}` : 'group-title';
-  head.textContent = `${label} ${tasks.length}`;
-  frag.appendChild(head);
-  for (const t of tasks) frag.appendChild(renderRow(t, today));
-  return frag;
-}
+// ── 카테고리 ─────────────────────────────────────────────────
 
 const hideCompleted = () => Boolean(state && state.settings.hideCompleted);
-
 const sources = () => (state && state.sources ? state.sources.filter((s) => s.enabled !== false) : []);
 const sourceOf = (id) => sources().find((s) => s.id === id) || null;
+const colorOf = (source) => `cat-${(source && source.color) || 'gray'}`;
 
 function categoryDot(source) {
   const dot = document.createElement('span');
-  dot.className = `dot cat-${(source && source.color) || 'gray'}`;
+  dot.className = `dot ${colorOf(source)}`;
   return dot;
 }
 
@@ -210,7 +87,8 @@ function renderTabs() {
   const open = state.tasks.filter((t) => !t.done);
   el.tabs.appendChild(make('all', '전체', open.length, null));
   for (const source of list) {
-    el.tabs.appendChild(make(source.id, source.label, open.filter((t) => t.sourceId === source.id).length, source));
+    el.tabs.appendChild(
+      make(source.id, source.label, open.filter((t) => t.sourceId === source.id).length, source));
   }
 }
 
@@ -234,15 +112,10 @@ function fillSourceSelect() {
   if (preferred) el.source.value = preferred;
 }
 
-function startEdit(id) {
-  editingId = id;
-  render({ force: true });
-}
+// ── 수정 ─────────────────────────────────────────────────────
 
-function stopEdit() {
-  editingId = null;
-  render({ force: true });
-}
+function startEdit(id) { editingId = id; render({ force: true }); }
+function stopEdit() { editingId = null; render({ force: true }); }
 
 function field(type, value, placeholder) {
   const input = document.createElement('input');
@@ -255,7 +128,7 @@ function field(type, value, placeholder) {
 
 /**
  * 항목을 그 자리에서 고치는 폼. 노션에 다녀오지 않아도 되도록
- * 화면에 보이는 값(제목·마감·분류·메모)은 전부 여기서 바꿀 수 있다.
+ * 화면에 보이는 값(제목·마감·메모)은 전부 여기서 바꿀 수 있다.
  */
 function renderEditor(task) {
   const form = document.createElement('form');
@@ -269,14 +142,9 @@ function renderEditor(task) {
   // 카테고리는 노션 DB 자체라 앱에서 옮길 수 없다. 어디 소속인지만 보여준다.
   const source = sourceOf(task.sourceId);
   const cat = document.createElement('div');
-  cat.className = 'editor-cat';
+  cat.className = `editor-cat ${colorOf(source)}`;
   cat.title = '카테고리는 노션 데이터베이스라 앱에서 옮길 수 없습니다';
-  if (source) {
-    cat.appendChild(categoryDot(source));
-    cat.append(document.createTextNode(source.label));
-  } else {
-    cat.append(document.createTextNode('카테고리 없음'));
-  }
+  cat.textContent = source ? source.label : '카테고리 없음';
 
   const when = document.createElement('div');
   when.className = 'editor-row';
@@ -297,9 +165,9 @@ function renderEditor(task) {
   later.type = 'button';
   later.className = 'btn';
   later.textContent = '내일로';
-  later.title = '마감일을 하루 미룹니다 (저장을 눌러야 반영됩니다)';
+  later.title = '날짜를 하루 미룹니다 (저장을 눌러야 반영됩니다)';
   later.addEventListener('click', () => {
-    date.value = window.TodoUtil.shiftDate(date.value || state.today, 1);
+    date.value = U().shiftDate(date.value || state.today, 1);
   });
 
   const actions = document.createElement('div');
@@ -318,7 +186,7 @@ function renderEditor(task) {
     editingId = null;
     window.todo.patchTask(task.id, {
       title: next,
-      due: window.TodoUtil.buildDue(date.value, time.value),
+      due: U().buildDue(date.value, time.value),
       note: note.value.trim(),
     });
     render({ force: true });
@@ -331,20 +199,164 @@ function renderEditor(task) {
   return form;
 }
 
+// ── 목록 ─────────────────────────────────────────────────────
+
+function groupTasks(tasks, today) {
+  const groups = { overdue: [], today: [], undated: [], done: [] };
+  for (const t of tasks) {
+    if (t.done) { groups.done.push(t); continue; }
+    const k = dueKey(t.due);
+    if (!k) groups.undated.push(t);
+    else if (k < today) groups.overdue.push(t);
+    else groups.today.push(t);
+  }
+  return groups;
+}
+
+function renderTask(task, today) {
+  const source = sourceOf(task.sourceId);
+  const row = document.createElement('div');
+
+  const key = dueKey(task.due);
+  const label = timeLabel(task.due);
+  const classes = ['task', colorOf(source)];
+
+  if (task.done) {
+    classes.push('done');
+  } else if (key && key < today) {
+    classes.push('late');
+  } else if (label) {
+    const at = new Date(task.due);
+    const mins = (at - Date.now()) / 60000;
+    if (mins < 0) classes.push('past');
+    else if (mins <= 60) classes.push('soon');
+  }
+  row.className = classes.join(' ');
+
+  // 시각을 맨 앞 열에 세워 하루가 시간순으로 읽히게 한다.
+  const when = document.createElement('span');
+  when.className = 'when';
+  if (key && key < today) {
+    // 지연은 날짜를 보여준다. 폭이 좁으므로 '9/7' 처럼 짧게 쓴다.
+    const d = new Date(`${key}T00:00:00`);
+    when.textContent = `${d.getMonth() + 1}/${d.getDate()}`;
+    when.title = `${humanDate(key)} 기한 · 지연`;
+  } else {
+    when.textContent = label || '';
+  }
+
+  const check = document.createElement('button');
+  check.className = 'check';
+  check.textContent = '✓';
+  check.title = task.done ? '완료 취소' : '완료 처리';
+  check.setAttribute('aria-pressed', String(task.done));
+  check.addEventListener('click', () => {
+    if (row.classList.contains('leaving')) return;   // 연타 방지
+
+    const next = !task.done;
+    if (next && hideCompleted() && !completedOpen) {
+      // 목록에서 빠지는 게 보이도록 애니메이션을 먼저 보여주고 상태를 바꾼다.
+      row.classList.add('leaving');
+      setTimeout(() => window.todo.patchTask(task.id, { done: true }), 240);
+      return;
+    }
+    row.classList.toggle('done');           // 응답을 기다리지 않고 바로 반응
+    window.todo.patchTask(task.id, { done: next });
+  });
+
+  const body = document.createElement('div');
+  body.className = 'body';
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = task.title;           // textContent — 노션 내용이 HTML 로 해석되지 않게
+  title.title = '눌러서 수정';
+  title.addEventListener('click', () => startEdit(task.id));
+  body.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+
+  // 카테고리 이름은 '전체' 탭에서만. 한 카테고리만 보고 있으면 군더더기다.
+  if (source && activeSource === 'all') {
+    const name = document.createElement('span');
+    name.className = 'catname';
+    name.textContent = source.label;
+    meta.appendChild(name);
+  }
+  if (task.done && task.doneAt) {
+    meta.appendChild(makeTag(`${timeLabel(task.doneAt) || ''} 완료`.trim()));
+  }
+  if (task.pending) meta.appendChild(makeTag('동기화 대기', 'pending'));
+  if (task.note) {
+    const note = document.createElement('span');
+    note.className = 'note';
+    note.textContent = task.note.replace(/\s+/g, ' ').slice(0, 54);
+    meta.appendChild(note);
+  }
+  if (meta.childElementCount) body.appendChild(meta);
+
+  const btns = document.createElement('div');
+  btns.className = 'rowbtns';
+
+  const edit = document.createElement('button');
+  edit.className = 'rowbtn';
+  edit.textContent = '✎';
+  edit.title = '수정';
+  edit.addEventListener('click', () => startEdit(task.id));
+  btns.appendChild(edit);
+
+  if (task.url) {
+    const open = document.createElement('button');
+    open.className = 'rowbtn';
+    open.textContent = '↗';
+    open.title = '노션에서 열기';
+    open.addEventListener('click', () => window.todo.openExternal(task.url));
+    btns.appendChild(open);
+  }
+
+  const del = document.createElement('button');
+  del.className = 'rowbtn del';
+  del.textContent = '🗑';
+  del.title = '삭제 (노션에서 보관 처리)';
+  del.addEventListener('click', () => {
+    if (confirm(`"${task.title}" 을(를) 삭제할까요?\n노션에서는 휴지통으로 이동합니다.`)) {
+      window.todo.deleteTask(task.id);
+    }
+  });
+  btns.appendChild(del);
+
+  row.append(when, check, body, btns);
+  return row;
+}
+
+function makeTag(text, cls) {
+  const span = document.createElement('span');
+  span.className = cls ? `tag ${cls}` : 'tag';
+  span.textContent = text;
+  return span;
+}
+
 const renderRow = (task, today) =>
   (task.id === editingId ? renderEditor(task) : renderTask(task, today));
 
-/**
- * 완료한 항목은 기본으로 접어둔다.
- * 밀린 걸 한꺼번에 정리한 날이면 완료 항목이 수십 개가 되어,
- * 정작 남은 할 일이 그 아래로 파묻힌다.
- */
+function renderGroup(label, tasks, today, cls) {
+  if (!tasks.length) return null;
+  const frag = document.createDocumentFragment();
+  const head = document.createElement('div');
+  head.className = cls ? `group-title ${cls}` : 'group-title';
+  head.textContent = `${label} ${tasks.length}`;
+  frag.appendChild(head);
+  for (const t of tasks) frag.appendChild(renderRow(t, today));
+  return frag;
+}
+
+/** 완료한 항목은 기본으로 접어둔다. 남은 할 일이 그 아래로 파묻히지 않도록. */
 function renderCompleted(tasks, today) {
   if (!tasks.length) return null;
   if (!hideCompleted()) return renderGroup('완료', tasks, today, null);
 
   const frag = document.createDocumentFragment();
-
   const head = document.createElement('button');
   head.type = 'button';
   head.className = 'group-title toggle';
@@ -361,21 +373,34 @@ function renderCompleted(tasks, today) {
   return frag;
 }
 
+/** 지금 기준 다음 한 건. 이 창만 보고 하루를 산다면 이게 제일 중요한 줄이다. */
+function renderNextUp(tasks) {
+  const next = U().nextUp(tasks);
+  if (!next) { el.next.hidden = true; return; }
+
+  const late = next.when < Date.now();
+  el.next.hidden = false;
+  el.next.className = late ? 'nextup late' : 'nextup';
+  el.nextWhen.textContent = U().untilLabel(next.when);
+  el.nextTime.textContent = timeLabel(next.task.due) || '';
+  el.nextTitle.textContent = next.task.title;
+}
+
+// ── 그리기 ───────────────────────────────────────────────────
+
 function render({ force = false } = {}) {
   if (!state) return;
 
-  // 수정하던 항목이 목록에서 사라졌다면(다른 기기에서 지웠거나 마감일이 바뀌어
-  // 오늘 목록에서 빠진 경우) 편집 상태를 푼다. 이걸 안 하면 아래 가드에 걸려
-  // 화면이 영영 갱신되지 않는다.
+  // 수정하던 항목이 목록에서 사라졌다면 편집 상태를 푼다.
+  // 이걸 안 하면 아래 가드에 걸려 화면이 영영 갱신되지 않는다.
   if (editingId && !state.tasks.some((t) => t.id === editingId)) editingId = null;
 
   // 수정 중에 다시 그리면 입력하던 내용이 날아간다.
-  // 동기화가 5분마다 도는 앱이라 이 가드가 없으면 실제로 겪게 된다.
   if (editingId && !force) return;
 
   const { today, status } = state;
 
-  el.date.textContent = humanDate(today);
+  el.date.textContent = humanDate(today, true);
   renderTabs();
   fillSourceSelect();
 
@@ -388,20 +413,20 @@ function render({ force = false } = {}) {
   const open = tasks.filter((t) => !t.done);
   const total = tasks.length;
 
-  // 완료율의 분모는 "마감일이 오늘인 항목"뿐이다.
+  renderNextUp(tasks);
+
+  // 완료율의 분모는 "날짜가 오늘인 항목"뿐이다.
   // 몇 달 밀린 걸 오늘 정리했다고 오늘 몫을 다 한 것은 아니다.
-  const stats = window.TodoUtil.todayStats(tasks, today);
+  const stats = U().todayStats(tasks, today);
 
   el.pct.textContent = stats.dueToday ? `${stats.percent}%` : '—';
-  el.pct.title = '마감일이 오늘인 항목 기준';
-  el.pct.classList.toggle('full', stats.cleared);
+  el.pct.title = '날짜가 오늘인 항목 기준';
   el.fill.style.width = `${stats.percent}%`;
-  el.fill.classList.toggle('full', stats.cleared);
 
   if (!total) {
     el.progress.textContent = '오늘 등록된 할 일이 없습니다';
   } else if (!stats.dueToday) {
-    const parts = ['오늘 마감인 항목 없음'];
+    const parts = ['오늘 날짜인 항목 없음'];
     if (stats.open) parts.push(`남은 ${stats.open}건`);
     if (stats.otherDone) parts.push(`오늘 처리 ${stats.otherDone}건`);
     el.progress.textContent = parts.join(' · ');
@@ -425,13 +450,13 @@ function render({ force = false } = {}) {
     empty.append(document.createTextNode(
       here ? `${here.label} 에는 오늘 할 일이 없습니다.` : '오늘 할 일이 비어 있습니다.'));
     empty.appendChild(document.createElement('br'));
-    empty.append(document.createTextNode('위에 입력하면 노션에도 함께 기록됩니다.'));
+    empty.append(document.createTextNode('위에 적으면 노션에도 함께 기록됩니다.'));
     el.list.appendChild(empty);
   } else {
     for (const [label, list, cls] of [
       ['지연', g.overdue, 'overdue'],
       ['오늘', g.today, null],
-      ['마감일 없음', g.undated, null],
+      ['날짜 없음', g.undated, null],
     ]) {
       const frag = renderGroup(label, list, today, cls);
       if (frag) el.list.appendChild(frag);
@@ -464,33 +489,33 @@ function render({ force = false } = {}) {
   el.pending.textContent = state.outboxCount ? `대기 ${state.outboxCount}건` : '';
 }
 
-// ── 입력 ──────────────────────────────────────────────────────
+// ── 입력 ─────────────────────────────────────────────────────
 
 function submit() {
   const title = el.title.value.trim();
   if (!title) return;
 
   const today = state ? state.today : dateKey();
-  const due = window.TodoUtil.buildDue(today, el.time.value);
+  window.todo.addTask({
+    title,
+    due: U().buildDue(today, el.time.value),
+    sourceId: el.source.value || null,
+  });
 
-  window.todo.addTask({ title, due, sourceId: el.source.value || null });
   el.title.value = '';
   el.time.value = '';
   el.title.focus();
 }
 
-el.add.addEventListener('click', submit);
 el.title.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+el.time.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 el.sync.addEventListener('click', () => window.todo.syncNow());
 el.settings.addEventListener('click', () => window.todo.openSettings());
 el.hide.addEventListener('click', () => window.todo.hideWindow());
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.todo.hideWindow(); });
 
 window.todo.onState((data) => { state = data; render(); });
-window.todo.getState().then((data) => {
-  state = data;
-  render();
-});
+window.todo.getState().then((data) => { state = data; render(); });
 
-// "n분 전 동기화" 표시를 살아있게 유지한다.
+// "n분 뒤", "n분 전 동기화" 표시를 살아있게 유지한다.
 setInterval(() => render(), 30000);

@@ -92,6 +92,34 @@
     return `${dateStr}T${pad(h)}:${pad(m)}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
   }
 
+  /**
+   * 지금 기준 "다음에 할 것" 하나.
+   * 앞으로 올 시각이 있으면 그중 가장 이른 것, 전부 지났으면 가장 오래 밀린 것.
+   * 하루 종일 이 창만 본다면 가장 크게 보여야 할 정보다.
+   */
+  function nextUp(tasks, now) {
+    const at = now || new Date();
+    const timed = (tasks || [])
+      .filter((t) => !t.done && t.due && t.due.includes('T'))
+      .map((t) => ({ task: t, when: new Date(t.due) }))
+      .sort((a, b) => a.when - b.when);
+
+    if (!timed.length) return null;
+    return timed.find((x) => x.when >= at) || timed[0];
+  }
+
+  /** '25분 뒤' / '지금' / '2시간 지남' */
+  function untilLabel(when, now) {
+    const mins = Math.round((when - (now || new Date())) / 60000);
+    if (mins <= -60) return `${Math.floor(-mins / 60)}시간 지남`;
+    if (mins < -1) return `${-mins}분 지남`;
+    if (mins <= 1) return '지금';
+    if (mins < 60) return `${mins}분 뒤`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}시간 ${m}분 뒤` : `${h}시간 뒤`;
+  }
+
   /** 'YYYY-MM-DD' 에서 n일 이동 */
   function shiftDate(dateStr, days) {
     const d = new Date(`${dateStr}T00:00:00`);
@@ -99,5 +127,9 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
-  return { completionPercent, todayStats, dateKeyOf, buildDue, shiftDate, ROUND_UP_FROM };
+  return {
+    completionPercent, todayStats, dateKeyOf,
+    nextUp, untilLabel,
+    buildDue, shiftDate, ROUND_UP_FROM,
+  };
 }));

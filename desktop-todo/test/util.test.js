@@ -120,3 +120,57 @@ test('빈 목록에서도 터지지 않는다', () => {
   assert.deepEqual(todayStats([], TODAY).percent, 0);
   assert.deepEqual(todayStats(undefined, TODAY).dueToday, 0);
 });
+
+// ── 다음 할 일 ─────────────────────────────────────────
+
+const { nextUp, untilLabel } = require('../src/renderer/util');
+
+const NOW = new Date('2026-09-10T13:00:00+00:00');
+const due = (t) => `2026-09-10T${t}:00+00:00`;
+
+test('다음 할 일은 앞으로 올 시각 중 가장 이른 것', () => {
+  const picked = nextUp([
+    { done: false, title: '늦은 것', due: due('17:00') },
+    { done: false, title: '다음 것', due: due('14:20') },
+    { done: false, title: '지난 것', due: due('09:00') },
+  ], NOW);
+
+  assert.equal(picked.task.title, '다음 것');
+  assert.equal(untilLabel(picked.when, NOW), '1시간 20분 뒤');
+});
+
+test('완료한 것과 시각 없는 것은 후보가 아니다', () => {
+  const picked = nextUp([
+    { done: true, title: '이미 끝냄', due: due('14:00') },
+    { done: false, title: '종일 항목', due: '2026-09-10' },
+    { done: false, title: '유일한 후보', due: due('16:00') },
+  ], NOW);
+
+  assert.equal(picked.task.title, '유일한 후보');
+});
+
+test('앞으로 올 게 없으면 가장 오래 밀린 것을 가리킨다', () => {
+  const picked = nextUp([
+    { done: false, title: '조금 지남', due: due('12:30') },
+    { done: false, title: '많이 지남', due: due('08:00') },
+  ], NOW);
+
+  assert.equal(picked.task.title, '많이 지남', '가장 급한 것부터 처리해야 한다');
+});
+
+test('할 게 없으면 아무것도 가리키지 않는다', () => {
+  assert.equal(nextUp([], NOW), null);
+  assert.equal(nextUp([{ done: false, title: 'x', due: '2026-09-10' }], NOW), null);
+  assert.equal(nextUp(undefined, NOW), null);
+});
+
+test('남은 시간을 사람이 읽는 말로 바꾼다', () => {
+  const at = (t) => new Date(due(t));
+  assert.equal(untilLabel(at('13:00'), NOW), '지금');
+  assert.equal(untilLabel(at('13:01'), NOW), '지금');
+  assert.equal(untilLabel(at('13:25'), NOW), '25분 뒤');
+  assert.equal(untilLabel(at('15:00'), NOW), '2시간 뒤');
+  assert.equal(untilLabel(at('15:30'), NOW), '2시간 30분 뒤');
+  assert.equal(untilLabel(at('12:40'), NOW), '20분 지남');
+  assert.equal(untilLabel(at('09:00'), NOW), '4시간 지남');
+});

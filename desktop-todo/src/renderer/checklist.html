@@ -9,38 +9,48 @@
   <link rel="stylesheet" href="checklist.css" />
 </head>
 <body>
-  <header class="titlebar">
-    <div>
-      <h1>오늘 할 일</h1>
-      <div class="date" id="dateLabel"></div>
+  <header class="brand">
+    <div class="brand-top">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.5 12.5l5.5 5.5L20.5 6.5" fill="none" stroke="currentColor"
+              stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <div class="brand-title">
+        <h1>오늘</h1>
+        <div class="date" id="dateLabel"></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="winbtns">
+        <button class="iconbtn" id="syncBtn" title="지금 동기화">⟳</button>
+        <button class="iconbtn" id="settingsBtn" title="설정">⚙</button>
+        <button class="iconbtn danger" id="hideBtn" title="트레이로 숨기기">✕</button>
+      </div>
     </div>
-    <div class="spacer"></div>
-    <div class="winbtns">
-      <button class="iconbtn" id="syncBtn" title="지금 동기화">⟳</button>
-      <button class="iconbtn" id="settingsBtn" title="설정">⚙</button>
-      <button class="iconbtn danger" id="hideBtn" title="트레이로 숨기기">✕</button>
-    </div>
-  </header>
 
-  <section class="progress">
-    <div class="progress-head">
-      <div class="bar"><div class="fill" id="progressFill"></div></div>
+    <div class="meter">
+      <div class="track"><div class="fill" id="progressFill"></div></div>
       <span class="pct" id="progressPct">—</span>
     </div>
-    <div class="progress-text" id="progressText">불러오는 중…</div>
+    <div class="meter-sub" id="progressText">불러오는 중…</div>
+  </header>
+
+  <section class="nextup" id="nextUp" hidden>
+    <div class="nextup-head">
+      <span class="nextup-kicker">다음</span>
+      <span class="nextup-when" id="nextUpWhen"></span>
+    </div>
+    <div class="nextup-row">
+      <span class="nextup-time" id="nextUpTime"></span>
+      <span class="nextup-title" id="nextUpTitle"></span>
+    </div>
   </section>
 
   <nav class="tabs" id="tabs"></nav>
 
   <section class="composer">
-    <div class="composer-row">
-      <input class="field" id="newTitle" placeholder="할 일 추가 후 Enter" autocomplete="off" />
-      <button class="btn primary" id="addBtn">추가</button>
-    </div>
-    <div class="composer-row sub">
-      <input class="field" id="newTime" type="time" title="마감 시각 (비워두면 종일)" />
-      <select class="field" id="newSource" title="어느 카테고리에 추가할지"></select>
-    </div>
+    <input class="field" id="newTitle" placeholder="할 일을 적고 Enter" autocomplete="off" />
+    <input class="field time" id="newTime" type="time" title="시각 (비워두면 종일)" />
+    <select class="field pick" id="newSource" title="어디에 추가할지"></select>
   </section>
 
   <main class="scroll" id="list"></main>

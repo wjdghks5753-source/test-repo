@@ -66,25 +66,25 @@ const DEFAULT_SOURCES = [
   {
     id: 'personal',
     label: 'PERSONAL',
-    color: 'gray',
-    databaseId: '2c48143c-2e66-8067-9c75-cd40794671d7',
+    color: 'lime',                       // 로고의 라임 그린
+    databaseId: '2c48143c-2e66-8067-9c75-cd40794671d7',   // 세종스포츠 DB / PERSONAL / PERSONAL TASK
     props: { title: '할 일', done: '완료', due: '진행일시', note: '텍스트', doneAt: '' },
     enabled: true,
   },
   {
     id: 'project',
-    label: 'SJS PROJECT',
-    color: 'blue',
-    databaseId: '3cd8143c-2e66-8050-934a-ca0e2cfef191',
+    label: 'PROJECT',
+    color: 'blue',                       // 로고의 블루
+    databaseId: '3cd8143c-2e66-8050-934a-ca0e2cfef191',   // 세종스포츠 DB / PROJECT / SJS-TASK
     props: { title: '이름', done: '체크박스', due: '날짜', note: '', doneAt: '' },
     enabled: true,
   },
   {
     id: 'study',
-    label: 'SJS STUDY',
-    color: 'green',
-    databaseId: '3d68143c-2e66-80b0-8d39-d64baac0b22d',
-    props: { title: '이름', done: '체크박스', due: '날짜', note: '', doneAt: '' },
+    label: 'STUDY',
+    color: 'steel',                      // 로고의 실버 그레이
+    databaseId: 'a6231fa3-078d-4190-a6c0-25da2678d80f',   // 세종스포츠 DB / STUDY / SJS-STUDY
+    props: { title: '주제', done: '완료', due: '날짜', note: '질문', doneAt: '' },
     enabled: true,
   },
 ];
