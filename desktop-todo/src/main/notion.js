@@ -148,29 +148,37 @@ class NotionClient {
    *  - 마감일이 비어 있고 최근에 만들어진 것 (선택)
    */
   async queryOpenTasks({ today, carryOverDays, includeNoDueDate }) {
-    const dueBranch = { and: [{ property: P.DUE, date: { on_or_before: today } }] };
+    const notDone = { property: P.DONE, checkbox: { equals: false } };
+
+    // 노션 복합 필터는 두 단계까지만 중첩된다. and 안의 or 안에 다시 and 를 넣으면
+    // 400 "body failed validation" 이 돌아온다. 그래서 하나의 or 로 묶는 대신
+    // 평평한 질의를 두 번 던지고 여기서 합친다. 호출이 한 번 늘 뿐이다.
+    const dated = [notDone, { property: P.DUE, date: { on_or_before: today } }];
     if (carryOverDays > 0) {
-      dueBranch.and.push({
-        property: P.DUE,
-        date: { on_or_after: D.addDays(today, -carryOverDays) },
-      });
+      dated.push({ property: P.DUE, date: { on_or_after: D.addDays(today, -carryOverDays) } });
     }
 
-    const branches = [dueBranch];
-    if (includeNoDueDate) {
-      const since = D.toNotionDateTime(D.atTime(D.addDays(today, -(carryOverDays || 30)), '00:00'));
-      branches.push({
-        and: [
-          { property: P.DUE, date: { is_empty: true } },
-          { timestamp: 'created_time', created_time: { on_or_after: since } },
-        ],
-      });
-    }
-
-    return this._queryAll(
-      { and: [{ property: P.DONE, checkbox: { equals: false } }, { or: branches }] },
+    const tasks = await this._queryAll(
+      { and: dated },
       [{ property: P.DUE, direction: 'ascending' }],
     );
+
+    if (!includeNoDueDate) return tasks;
+
+    const since = D.toNotionDateTime(D.atTime(D.addDays(today, -(carryOverDays || 30)), '00:00'));
+    const undated = await this._queryAll({
+      and: [
+        notDone,
+        { property: P.DUE, date: { is_empty: true } },
+        { timestamp: 'created_time', created_time: { on_or_after: since } },
+      ],
+    });
+
+    const seen = new Set(tasks.map((t) => t.id));
+    for (const task of undated) {
+      if (!seen.has(task.id)) tasks.push(task);
+    }
+    return tasks;
   }
 
   /** 해당 날짜에 완료 처리한 항목. 완료일시가 없는 DB 면 마감일로 대신 찾는다. */

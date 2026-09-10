@@ -66,31 +66,42 @@ test('오늘 목록 조회는 미완료 + 오늘 이전 마감으로 좁힌다',
   const c = stubbed(ALL);
   await c.queryOpenTasks({ today: '2026-09-09', carryOverDays: 7, includeNoDueDate: false });
 
-  const { filter } = c.sent[0].body;
-  assert.deepEqual(filter.and[0], { property: P.DONE, checkbox: { equals: false } });
-
-  const due = filter.and[1].or[0].and;
-  assert.deepEqual(due[0], { property: P.DUE, date: { on_or_before: '2026-09-09' } });
-  assert.deepEqual(due[1], { property: P.DUE, date: { on_or_after: '2026-09-02' } });
+  assert.equal(c.sent.length, 1);
+  const { and } = c.sent[0].body.filter;
+  assert.deepEqual(and[0], { property: P.DONE, checkbox: { equals: false } });
+  assert.deepEqual(and[1], { property: P.DUE, date: { on_or_before: '2026-09-09' } });
+  assert.deepEqual(and[2], { property: P.DUE, date: { on_or_after: '2026-09-02' } });
 });
 
 test('carryOverDays 가 0 이면 기간 하한을 걸지 않는다', async () => {
   const c = stubbed(ALL);
   await c.queryOpenTasks({ today: '2026-09-09', carryOverDays: 0, includeNoDueDate: false });
 
-  const due = c.sent[0].body.filter.and[1].or[0].and;
-  assert.equal(due.length, 1, '하한 없이 전체 미완료를 끌어온다');
+  assert.equal(c.sent[0].body.filter.and.length, 2, '하한 없이 전체 미완료를 끌어온다');
 });
 
-test('마감일 없는 항목은 최근 생성분으로만 제한한다', async () => {
+test('마감일 없는 항목은 별도 질의로 가져오고 최근 생성분만 본다', async () => {
   const c = stubbed(ALL);
   await c.queryOpenTasks({ today: '2026-09-09', carryOverDays: 7, includeNoDueDate: true });
 
-  const branches = c.sent[0].body.filter.and[1].or;
-  assert.equal(branches.length, 2);
-  assert.deepEqual(branches[1].and[0], { property: P.DUE, date: { is_empty: true } });
-  assert.equal(branches[1].and[1].timestamp, 'created_time',
+  assert.equal(c.sent.length, 2, '한 필터에 or 로 욱여넣지 않고 두 번 나눠 묻는다');
+  const { and } = c.sent[1].body.filter;
+  assert.deepEqual(and[1], { property: P.DUE, date: { is_empty: true } });
+  assert.equal(and[2].timestamp, 'created_time',
     '제한이 없으면 몇 달치 미완료가 통째로 딸려온다');
+});
+
+test('마감일 없는 항목이 앞선 결과와 겹치면 한 번만 담는다', async () => {
+  const c = stubbed(ALL);
+  const page = (id) => ({ id, url: `u/${id}`, properties: { '할 일': { title: [{ plain_text: id }] } } });
+  let call = 0;
+  c.request = async () => {
+    call += 1;
+    return { results: call === 1 ? [page('a'), page('b')] : [page('b'), page('c')], has_more: false };
+  };
+
+  const tasks = await c.queryOpenTasks({ today: '2026-09-09', carryOverDays: 7, includeNoDueDate: true });
+  assert.deepEqual(tasks.map((t) => t.id), ['a', 'b', 'c']);
 });
 
 test('완료 목록은 완료일시의 하루 구간으로 조회한다', async () => {
@@ -165,4 +176,62 @@ test('프록시가 HTML 을 돌려줘도 원인을 알 수 있는 오류가 난�
 test('토큰이 없으면 네트워크를 타지 않는다', async () => {
   const c = new NotionClient({ token: null, databaseId: 'db-1' });
   await assert.rejects(() => c.request('GET', '/x'), /토큰이 설정되지 않았습니다/);
+});
+
+// ── 노션 필터 구조 검증 ────────────────────────────────
+// 노션 복합 필터는 두 단계까지만 중첩할 수 있다. 세 단계를 보내면 400 이 오는데,
+// 단위 테스트가 요청 내용만 확인하면 이 규칙 위반을 놓친다. 실제로 놓쳤다.
+
+/** and/or 가 몇 겹으로 쌓였는지 (잎이면 0) */
+function compoundDepth(node) {
+  const children = node.and || node.or;
+  if (!Array.isArray(children)) return 0;
+  return 1 + Math.max(0, ...children.map(compoundDepth));
+}
+
+function assertValidFilter(filter, label) {
+  const depth = compoundDepth(filter);
+  assert.ok(depth >= 1, `${label}: 필터가 비어 있다`);
+  assert.ok(depth <= 2, `${label}: and/or 중첩이 ${depth}단계 — 노션은 2단계까지만 받는다`);
+
+  const walk = (node) => {
+    const children = node.and || node.or;
+    if (Array.isArray(children)) return children.forEach(walk);
+    assert.ok(
+      typeof node.property === 'string' || typeof node.timestamp === 'string',
+      `${label}: 잎 필터에 property 나 timestamp 가 없다 — ${JSON.stringify(node)}`,
+    );
+  };
+  walk(filter);
+}
+
+test('만들어 보내는 모든 필터가 노션 중첩 규칙을 지킨다', async () => {
+  const combos = [
+    { carryOverDays: 7, includeNoDueDate: true },
+    { carryOverDays: 7, includeNoDueDate: false },
+    { carryOverDays: 0, includeNoDueDate: true },
+    { carryOverDays: 0, includeNoDueDate: false },
+  ];
+
+  for (const options of combos) {
+    for (const schema of [ALL, ['할 일', '완료', '마감일', '텍스트']]) {
+      const c = stubbed(schema);
+      await c.queryOpenTasks({ today: '2026-09-09', ...options });
+      await c.queryCompletedOn('2026-09-09');
+
+      assert.ok(c.sent.length > 0);
+      c.sent.forEach((req, i) => assertValidFilter(req.body.filter, `${JSON.stringify(options)} #${i}`));
+    }
+  }
+});
+
+test('중첩이 세 단계인 필터는 검증에서 걸러진다', () => {
+  const tooDeep = {
+    and: [
+      { property: '완료', checkbox: { equals: false } },
+      { or: [{ and: [{ property: '마감일', date: { is_empty: true } }] }] },
+    ],
+  };
+  assert.equal(compoundDepth(tooDeep), 3);
+  assert.throws(() => assertValidFilter(tooDeep, '3단계'), /2단계까지만/);
 });
