@@ -1,0 +1,198 @@
+/*
+ * 세종스포츠정형외과 로고에서 가져온 팔레트.
+ *   네이비 = 구조, 라임 = 완료·진행, 블루 = 조작, 실버 = 보조
+ *
+ * 머리말은 밝은 테마에서도 네이비를 유지한다. 창을 어떤 테마로 두든
+ * 로고와 같은 얼굴이 먼저 보이게 하려는 의도다.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* 브랜드 원색 */
+  --navy:      #22335A;
+  --navy-deep: #16223D;
+  --lime:      #A5CE39;
+  --lime-deep: #8CB22C;
+  --blue:      #2E86D9;
+  --steel:     #8E99A8;
+
+  /* 머리말 (테마와 무관하게 고정) */
+  --head-bg: linear-gradient(158deg, #26385F 0%, #16223D 100%);
+  --head-fg: #FFFFFF;
+  --head-muted: rgba(255, 255, 255, .60);
+  --head-line: rgba(255, 255, 255, .12);
+  --head-track: rgba(255, 255, 255, .14);
+
+  /* 본문 — 밝은 테마 */
+  --bg: #F1F4F9;
+  --panel: #FFFFFF;
+  --panel-2: #E9EEF5;
+  --line: #DBE2EC;
+  --text: #16223D;
+  --muted: #5A6980;
+  --faint: #8C99AC;
+
+  --accent: var(--blue);
+  --accent-soft: #DEEBFA;
+  --ok: var(--lime-deep);
+  --warn: #C87A16;
+  --danger: #D2434F;
+
+  --radius: 12px;
+  --shadow: 0 12px 32px rgba(22, 34, 61, .14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0E1626;
+    --panel: #16223A;
+    --panel-2: #1D2B47;
+    --line: #293A5C;
+    --text: #E8EDF5;
+    --muted: #97A5BA;
+    --faint: #6B7A91;
+
+    --accent: #58A3EC;
+    --accent-soft: #1C3350;
+    --ok: var(--lime);
+    --warn: #E0A049;
+    --danger: #E4626E;
+
+    --shadow: 0 12px 32px rgba(0, 0, 0, .5);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14.5px/1.55 "Pretendard", "Malgun Gothic", "맑은 고딕", -apple-system,
+        BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 머리말 ────────────────────────────────────────────── */
+
+.brand {
+  -webkit-app-region: drag;
+  flex: none;
+  background: var(--head-bg);
+  color: var(--head-fg);
+  padding: 13px 8px 12px 17px;
+  border-bottom: 1px solid var(--head-line);
+}
+
+.brand-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--lime);
+}
+
+.brand-title h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+}
+
+.brand-title .date {
+  font-size: 11.5px;
+  color: var(--head-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+}
+
+.spacer { flex: 1; }
+
+.winbtns {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 1px;
+}
+
+.iconbtn {
+  -webkit-app-region: no-drag;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--head-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+
+.iconbtn:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+.iconbtn.danger:hover { background: var(--danger); color: #fff; }
+.iconbtn.spin { animation: spin 1s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 공통 폼 ──────────────────────────────────────────── */
+
+input, select, textarea, button { font: inherit; color: inherit; }
+
+.field {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  outline: none;
+  user-select: text;
+}
+
+.field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.btn {
+  -webkit-app-region: no-drag;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn:hover { background: var(--panel-2); }
+
+.btn.primary {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+
+.btn.primary:hover { background: #2B3F6D; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.scroll::-webkit-scrollbar { width: 10px; }
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 10px;
+  border: 3px solid var(--bg);
+}

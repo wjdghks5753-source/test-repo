@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:;" />
+  <title>설정</title>
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header class="brand">
+    <div class="brand-top">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.5 12.5l5.5 5.5L20.5 6.5" fill="none" stroke="currentColor"
+              stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <div class="brand-title">
+        <h1>설정</h1>
+        <div class="date">오늘 할 일 · 세종스포츠</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="winbtns">
+        <button class="iconbtn danger" id="closeBtn" title="닫기">✕</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="scroll">
+    <section class="card">
+      <h2>노션 연결</h2>
+      <p class="hint">
+        노션 &gt; 설정 &gt; 연결 &gt; <b>내 연결 개발 또는 관리</b>에서 내부 통합을 만들고
+        <b>Internal Integration Secret</b>(<code>ntn_</code> 또는 <code>secret_</code>으로 시작)을 붙여넣으세요.
+        그 다음 대상 데이터베이스 페이지에서 <b>··· &gt; 연결 &gt; 방금 만든 통합</b>을 추가해야 접근이 열립니다.
+      </p>
+
+      <label class="row">
+        <span>통합 토큰</span>
+        <input class="field" id="notionToken" type="password" placeholder="ntn_… (저장하면 다시 표시되지 않습니다)" />
+      </label>
+
+    </section>
+
+    <section class="card">
+      <h2>카테고리</h2>
+      <p class="hint">
+        카테고리 하나가 노션 데이터베이스 하나입니다. 데이터베이스마다 속성 이름이 다르므로
+        (<code>할 일</code> / <code>이름</code>, <code>완료</code> / <code>체크박스</code>)
+        아래에서 각각 맞춰 줍니다. <b>비워 둔 속성은 그 기능만 생략</b>되고 나머지는 그대로 동작합니다.
+        각 데이터베이스에도 <b>··· &gt; 연결</b>에서 통합을 추가해야 접근이 열립니다.
+      </p>
+
+      <div id="sourceList" class="sources"></div>
+
+      <div class="row btns">
+        <button class="btn" id="addSourceBtn">카테고리 추가</button>
+        <button class="btn" id="testBtn">연결 테스트</button>
+      </div>
+      <div class="result" id="testResult"></div>
+    </section>
+
+    <section class="card">
+      <h2>알림</h2>
+      <p class="hint">지정한 시각에 남은 할 일을 알려줍니다.</p>
+
+      <div class="row">
+        <span>알림 시각</span>
+        <div class="chips" id="timeChips"></div>
+      </div>
+      <div class="row btns">
+        <input class="field time" id="newNotifyTime" type="time" />
+        <button class="btn" id="addTimeBtn">시각 추가</button>
+      </div>
+
+      <label class="row">
+        <span>마감 몇 분 전 알림</span>
+        <input class="field num" id="notifyBeforeMin" type="number" min="0" max="180" step="5" />
+        <span class="unit">분 (0이면 끔)</span>
+      </label>
+
+      <label class="row check">
+        <input type="checkbox" id="popupOnNotify" />
+        <span>알림과 함께 체크리스트 창도 띄우기</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>동기화</h2>
+      <label class="row">
+        <span>자동 동기화 주기</span>
+        <input class="field num" id="syncIntervalMin" type="number" min="1" max="120" />
+        <span class="unit">분</span>
+      </label>
+      <label class="row">
+        <span>지난 미완료 끌어오기</span>
+        <input class="field num" id="carryOverDays" type="number" min="0" max="90" />
+        <span class="unit">일치 (0이면 전체)</span>
+      </label>
+      <label class="row check">
+        <input type="checkbox" id="includeNoDueDate" />
+        <span>마감일이 없는 항목도 오늘 목록에 표시</span>
+      </label>
+      <label class="row check">
+        <input type="checkbox" id="hideCompleted" />
+        <span>체크한 항목은 접어서 숨기기 (완료 섹션을 눌러 펼칠 수 있습니다)</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>창과 시작</h2>
+      <label class="row check">
+        <input type="checkbox" id="autoLaunch" />
+        <span>컴퓨터를 켤 때 자동 실행</span>
+      </label>
+      <label class="row check">
+        <input type="checkbox" id="showOnLaunch" />
+        <span>실행하면 바로 체크리스트 창 띄우기</span>
+      </label>
+      <label class="row check">
+        <input type="checkbox" id="alwaysOnTop" />
+        <span>항상 다른 창 위에 표시</span>
+      </label>
+      <label class="row">
+        <span>기본 카테고리</span>
+        <select class="field" id="defaultSourceId"></select>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>반복 할 일</h2>
+      <p class="hint">지정한 요일이 되면 아침에 자동으로 오늘 목록에 추가되고 노션에도 기록됩니다.</p>
+
+      <div id="routineList" class="routines"></div>
+
+      <div class="routine-form">
+        <input class="field" id="routineTitle" placeholder="예: 논문 리딩 30분" />
+        <div class="weekdays" id="weekdays"></div>
+        <div class="row btns">
+          <input class="field time" id="routineTime" type="time" title="시각 (비워두면 종일)" />
+          <select class="field" id="routineSource"></select>
+          <button class="btn primary" id="addRoutineBtn">추가</button>
+        </div>
+      </div>
+
+      <div class="row btns">
+        <button class="btn" id="runRoutinesBtn">오늘 몫 지금 만들기</button>
+        <span class="result" id="routineResult"></span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="savebar">
+    <span class="result" id="saveResult"></span>
+    <div class="spacer"></div>
+    <button class="btn primary" id="saveBtn">저장</button>
+  </footer>
+
+  <script src="settings.js"></script>
+</body>
+</html>
