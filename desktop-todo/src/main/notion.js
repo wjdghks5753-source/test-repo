@@ -3,7 +3,14 @@
 const D = require('./dates');
 
 const API = 'https://api.notion.com/v1';
+
+// 기본은 오래 안정적인 버전을 쓴다.
 const NOTION_VERSION = '2022-06-28';
+
+// 데이터 소스가 여럿인 DB 는 위 버전이 조회를 거부한다.
+// 그런 DB 만 아래 버전으로 갈아타 data_sources 엔드포인트를 쓴다.
+const DS_VERSION = '2025-09-03';
+const MULTI_SOURCE = /multiple data sources/i;
 
 /**
  * 여러 노션 DB 를 한 화면에 모은다.
@@ -31,6 +38,7 @@ class NotionClient {
   constructor({ token }) {
     this.token = token;
     this.schemas = new Map();   // sourceId -> Set(속성 이름)
+    this.modes = new Map();     // sourceId -> { kind, dataSourceId, note }
     this._chain = Promise.resolve();
     this._lastCall = 0;
   }
@@ -54,7 +62,9 @@ class NotionClient {
     return run;
   }
 
-  async request(method, path, body, attempt = 0) {
+  async request(method, path, body, opts = {}) {
+    const version = opts.version || NOTION_VERSION;
+    const attempt = opts.attempt || 0;
     if (!this.token) throw new NotionError('노션 토큰이 설정되지 않았습니다.', 401);
 
     return this._queue(async () => {
@@ -64,7 +74,7 @@ class NotionClient {
           method,
           headers: {
             Authorization: `Bearer ${this.token}`,
-            'Notion-Version': NOTION_VERSION,
+            'Notion-Version': version,
             'Content-Type': 'application/json',
           },
           body: body ? JSON.stringify(body) : undefined,
@@ -77,7 +87,7 @@ class NotionClient {
         if (attempt < 3) {
           const retryAfter = Number(res.headers.get('retry-after')) || 0;
           await sleep(retryAfter ? retryAfter * 1000 : 1000 * 2 ** attempt);
-          return this.request(method, path, body, attempt + 1);
+          return this.request(method, path, body, { version, attempt: attempt + 1 });
         }
       }
 
@@ -109,9 +119,44 @@ class NotionClient {
 
   // ── 스키마 ────────────────────────────────────────────────
 
-  /** DB 를 읽어 어떤 속성이 실제로 있는지 기억해 둔다. */
+  /**
+   * DB 를 읽어 어떤 속성이 실제로 있는지 기억해 둔다.
+   *
+   * 노션에서 DB 안에 데이터 소스를 하나 더 만들면 기존 API 가 조회를 거부한다
+   * ("Databases with multiple data sources are not supported").
+   * 그럴 때는 새 API 버전으로 데이터 소스 목록을 받아 하나를 골라 쓴다.
+   */
   async loadSchema(source) {
-    const db = await this.request('GET', `/databases/${source.databaseId}`);
+    let db;
+    let note = null;
+    let mode = { kind: 'database' };
+
+    try {
+      db = await this.request('GET', `/databases/${source.databaseId}`);
+    } catch (err) {
+      if (!MULTI_SOURCE.test(err.message || '')) throw err;
+
+      const outer = await this.request('GET', `/databases/${source.databaseId}`, null,
+        { version: DS_VERSION });
+      const list = outer.data_sources || [];
+      if (!list.length) throw err;
+
+      const chosen =
+        list.find((d) => d.id === source.dataSourceId) ||
+        list.find((d) => (d.name || '').trim() === (source.label || '').trim()) ||
+        list[0];
+
+      mode = { kind: 'dataSource', dataSourceId: chosen.id };
+      db = await this.request('GET', `/data_sources/${chosen.id}`, null, { version: DS_VERSION });
+
+      if (list.length > 1) {
+        const names = list.map((d) => d.name || '(이름 없음)').join(', ');
+        note = `"${source.label}" 의 데이터베이스에 데이터 소스가 ${list.length}개 있어 ` +
+               `"${chosen.name || chosen.id}" 를 사용합니다 (${names}).`;
+      }
+    }
+
+    this.modes.set(source.id, mode);
     const names = new Set(Object.keys(db.properties || {}));
     this.schemas.set(source.id, names);
 
@@ -129,6 +174,7 @@ class NotionClient {
       properties: [...names],
       titleProperty: titleName || null,
       missing,
+      note,
     };
   }
 
@@ -159,16 +205,25 @@ class NotionClient {
 
   // ── 조회 ──────────────────────────────────────────────────
 
+  /** 이 카테고리를 어느 엔드포인트로 물어볼지 */
+  _endpoint(source) {
+    const mode = this.modes.get(source.id);
+    return mode && mode.kind === 'dataSource'
+      ? { path: `/data_sources/${mode.dataSourceId}/query`, opts: { version: DS_VERSION } }
+      : { path: `/databases/${source.databaseId}/query`, opts: {} };
+  }
+
   async _queryAll(source, filter, sorts) {
+    const { path, opts } = this._endpoint(source);
     const results = [];
     let cursor;
     do {
-      const page = await this.request('POST', `/databases/${source.databaseId}/query`, {
+      const page = await this.request('POST', path, {
         filter,
         sorts,
         page_size: 100,
         ...(cursor ? { start_cursor: cursor } : {}),
-      });
+      }, opts);
       results.push(...page.results);
       cursor = page.has_more ? page.next_cursor : null;
     } while (cursor);
@@ -186,16 +241,28 @@ class NotionClient {
     const dueName = this._require(source, 'due');
     const notDone = { property: doneName, checkbox: { equals: false } };
 
-    const dated = [notDone, { property: dueName, date: { on_or_before: today } }];
+    // 노션에 날짜만 주고 거르면 시간대 해석이 엇갈릴 수 있다. 저녁 7시 30분처럼
+    // 한국 날짜와 UTC 날짜가 갈리는 항목이 통째로 빠지는 일이 생긴다.
+    // 그래서 앞뒤로 하루씩 넉넉히 받아오고, 오늘인지 아닌지는 아래에서
+    // 이 PC 의 로컬 날짜로 다시 판정한다.
+    const dated = [notDone, { property: dueName, date: { on_or_before: D.addDays(today, 1) } }];
     if (carryOverDays > 0) {
-      dated.push({ property: dueName, date: { on_or_after: D.addDays(today, -carryOverDays) } });
+      dated.push({ property: dueName, date: { on_or_after: D.addDays(today, -carryOverDays - 1) } });
     }
 
-    const tasks = await this._queryAll(
+    const fetched = await this._queryAll(
       source,
       { and: dated },
       [{ property: dueName, direction: 'ascending' }],
     );
+
+    const floor = carryOverDays > 0 ? D.addDays(today, -carryOverDays) : null;
+    const tasks = fetched.filter((task) => {
+      const key = D.toDateKey(task.due);
+      if (!key) return true;                       // 날짜 없는 항목은 여기서 거르지 않는다
+      if (key > today) return false;               // 내일 것은 오늘 목록이 아니다
+      return !floor || key >= floor;
+    });
 
     if (!includeNoDueDate) return tasks;
 
@@ -220,23 +287,18 @@ class NotionClient {
     const doneName = this._require(source, 'done');
     const isDone = { property: doneName, checkbox: { equals: true } };
     const doneAtName = this.prop(source, 'doneAt');
+    const field = doneAtName || this._require(source, 'due');
 
-    if (doneAtName) {
-      const from = D.toNotionDateTime(D.atTime(today, '00:00'));
-      const to = D.toNotionDateTime(D.atTime(D.addDays(today, 1), '00:00'));
-      return this._queryAll(source, {
-        and: [
-          isDone,
-          { property: doneAtName, date: { on_or_after: from } },
-          { property: doneAtName, date: { before: to } },
-        ],
-      });
-    }
-
-    const dueName = this._require(source, 'due');
-    return this._queryAll(source, {
-      and: [isDone, { property: dueName, date: { equals: today } }],
+    // 여기서도 하루씩 넓게 받아 로컬 날짜로 다시 거른다.
+    const fetched = await this._queryAll(source, {
+      and: [
+        isDone,
+        { property: field, date: { on_or_after: D.addDays(today, -1) } },
+        { property: field, date: { on_or_before: D.addDays(today, 1) } },
+      ],
     });
+
+    return fetched.filter((task) => D.toDateKey(doneAtName ? task.doneAt : task.due) === today);
   }
 
   // ── 변환 ──────────────────────────────────────────────────
@@ -256,6 +318,7 @@ class NotionClient {
       title: plain(get('title')?.title) || '(제목 없음)',
       done: get('done')?.checkbox === true,
       due: get('due')?.date?.start ?? null,
+      dueEnd: get('due')?.date?.end ?? null,     // 19:30~20:00 같은 범위의 끝
       note: plain(get('note')?.rich_text),
       doneAt: get('doneAt')?.date?.start ?? null,
       url: page.url,
@@ -275,7 +338,13 @@ class NotionClient {
     if (patch.title !== undefined) put('title', { title: [{ text: { content: patch.title.slice(0, 2000) } }] });
     if (patch.done !== undefined) put('done', { checkbox: Boolean(patch.done) });
     if (patch.note !== undefined) put('note', { rich_text: patch.note ? [{ text: { content: patch.note.slice(0, 2000) } }] : [] });
-    if (patch.due !== undefined) put('due', { date: patch.due ? { start: patch.due } : null });
+    if (patch.due !== undefined) {
+      // 끝 시각을 빠뜨리면 노션 캘린더에서 30분짜리 일정이 시점 하나로 납작해진다.
+      const date = patch.due
+        ? { start: patch.due, ...(patch.dueEnd ? { end: patch.dueEnd } : {}) }
+        : null;
+      put('due', { date });
+    }
     if (patch.doneAt !== undefined) put('doneAt', { date: patch.doneAt ? { start: patch.doneAt } : null });
 
     return out;
@@ -284,10 +353,16 @@ class NotionClient {
   // ── 쓰기 ──────────────────────────────────────────────────
 
   async createTask(source, payload) {
+    const mode = this.modes.get(source.id);
+    const useDs = mode && mode.kind === 'dataSource';
+
     const page = await this.request('POST', '/pages', {
-      parent: { database_id: source.databaseId },
+      parent: useDs
+        ? { type: 'data_source_id', data_source_id: mode.dataSourceId }
+        : { database_id: source.databaseId },
       properties: this.buildProperties(source, payload),
-    });
+    }, useDs ? { version: DS_VERSION } : {});
+
     return this.toTask(source, page);
   }
 

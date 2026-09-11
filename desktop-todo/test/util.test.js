@@ -174,3 +174,19 @@ test('남은 시간을 사람이 읽는 말로 바꾼다', () => {
   assert.equal(untilLabel(at('12:40'), NOW), '20분 지남');
   assert.equal(untilLabel(at('09:00'), NOW), '4시간 지남');
 });
+
+test('일정을 옮기면 길이를 유지한 채 끝 시각도 따라간다', () => {
+  const { shiftEnd } = require('../src/renderer/util');
+
+  const moved = shiftEnd(
+    '2026-09-11T19:30:00+09:00',
+    '2026-09-11T20:00:00+09:00',
+    buildDue('2026-09-12', '19:30'),
+  );
+  assert.match(moved, /^2026-09-12T20:00:00[+-]\d{2}:\d{2}$/, '30분짜리는 30분으로 유지된다');
+
+  assert.equal(shiftEnd('2026-09-11T19:30:00+09:00', null, buildDue('2026-09-12', '19:30')), null,
+    '원래 끝이 없으면 만들지 않는다');
+  assert.equal(shiftEnd('2026-09-11T19:30:00+09:00', '2026-09-11T20:00:00+09:00', '2026-09-12'), null,
+    '종일로 바꾸면 범위를 버린다');
+});

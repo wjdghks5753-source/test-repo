@@ -320,7 +320,10 @@ $('testBtn').addEventListener('click', async () => {
 
   const lines = results.map((r) => {
     if (!r.ok) return `✕ ${r.label} — ${r.error}`;
-    if (r.missing && r.missing.length) return `△ ${r.label} — 없는 속성: ${r.missing.join(', ')}`;
+    const extra = [];
+    if (r.missing && r.missing.length) extra.push(`없는 속성: ${r.missing.join(', ')}`);
+    if (r.note) extra.push(r.note);
+    if (extra.length) return `△ ${r.label} — ${extra.join(' / ')}`;
     return `✓ ${r.label} — "${r.title}" 확인 완료`;
   });
 

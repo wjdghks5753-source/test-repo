@@ -48,7 +48,7 @@ class SyncEngine {
 
   // ── 로컬 변경 ────────────────────────────────────────────────
 
-  addTask({ title, due, note, sourceId }) {
+  addTask({ title, due, dueEnd, note, sourceId }) {
     const source = this.sourceOf(sourceId || this.settings.get('defaultSourceId'));
     if (!source) return null;
 
@@ -59,6 +59,7 @@ class SyncEngine {
       title: title.trim(),
       done: false,
       due: due || null,
+      dueEnd: dueEnd || null,
       note: note || '',
       doneAt: null,
       url: null,
@@ -71,7 +72,7 @@ class SyncEngine {
       type: 'create',
       taskId: task.id,
       sourceId: source.id,
-      payload: { title: task.title, due: task.due, note: task.note, done: false },
+      payload: { title: task.title, due: task.due, dueEnd: task.dueEnd, note: task.note, done: false },
       tries: 0,
     });
     this._commit();

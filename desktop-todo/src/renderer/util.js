@@ -120,6 +120,31 @@
     return m ? `${h}시간 ${m}분 뒤` : `${h}시간 뒤`;
   }
 
+  /** Date -> 오프셋 포함 ISO (노션 date 속성이 받는 형식) */
+  function toOffsetISO(d) {
+    const off = -d.getTimezoneOffset();
+    const sign = off >= 0 ? '+' : '-';
+    const abs = Math.abs(off);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+           `T${pad(d.getHours())}:${pad(d.getMinutes())}:00` +
+           `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  }
+
+  /**
+   * 시작 시각을 옮길 때 끝 시각도 같은 길이만큼 따라가게 한다.
+   * 노션 캘린더의 19:30~20:00 같은 일정이 앱에서 고쳤다고
+   * 길이를 잃고 시점 하나로 납작해지는 걸 막는다.
+   */
+  function shiftEnd(oldStart, oldEnd, newStart) {
+    if (!oldStart || !oldEnd || !newStart) return null;
+    if (!newStart.includes('T')) return null;       // 종일로 바꿨다면 범위는 버린다
+
+    const span = new Date(oldEnd) - new Date(oldStart);
+    if (!(span > 0)) return null;
+
+    return toOffsetISO(new Date(new Date(newStart).getTime() + span));
+  }
+
   /** 'YYYY-MM-DD' 에서 n일 이동 */
   function shiftDate(dateStr, days) {
     const d = new Date(`${dateStr}T00:00:00`);
@@ -129,7 +154,7 @@
 
   return {
     completionPercent, todayStats, dateKeyOf,
-    nextUp, untilLabel,
+    nextUp, untilLabel, shiftEnd, toOffsetISO,
     buildDue, shiftDate, ROUND_UP_FROM,
   };
 }));

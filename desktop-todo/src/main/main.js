@@ -131,11 +131,21 @@ function isOnScreen(bounds) {
   });
 }
 
+let lastShowSync = 0;
+
 function showChecklist() {
   if (!checklistWindow || checklistWindow.isDestroyed()) createChecklistWindow();
   if (checklistWindow.isMinimized()) checklistWindow.restore();
   checklistWindow.show();
   checklistWindow.focus();
+
+  // 창을 볼 때마다 당겨온다. 주기 동기화만 믿으면 노션에서 방금 체크한 것이
+  // 최대 5분 동안 옛날 상태로 보인다. 연타로 두들기지 않게 10초는 건너뛴다.
+  const now = Date.now();
+  if (engine && now - lastShowSync > 10_000) {
+    lastShowSync = now;
+    engine.sync();
+  }
 }
 
 function createSettingsWindow() {
@@ -326,7 +336,7 @@ function registerIpc() {
       }
       try {
         const info = await probe.loadSchema(source);
-        results.push({ label: source.label, ok: true, title: info.title, missing: info.missing });
+        results.push({ label: source.label, ok: true, title: info.title, missing: info.missing, note: info.note });
       } catch (err) {
         results.push({ label: source.label, ok: false, error: err.message });
       }

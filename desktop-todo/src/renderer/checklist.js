@@ -183,10 +183,14 @@ function renderEditor(task) {
     const next = title.value.trim();
     if (!next) { title.focus(); return; }
 
+    const due = U().buildDue(date.value, time.value);
+
     editingId = null;
     window.todo.patchTask(task.id, {
       title: next,
-      due: U().buildDue(date.value, time.value),
+      due,
+      // 노션 캘린더의 범위 일정은 길이를 유지한 채 따라 움직인다.
+      dueEnd: U().shiftEnd(task.due, task.dueEnd, due),
       note: note.value.trim(),
     });
     render({ force: true });
@@ -243,6 +247,8 @@ function renderTask(task, today) {
     when.title = `${humanDate(key)} 기한 · 지연`;
   } else {
     when.textContent = label || '';
+    const end = timeLabel(task.dueEnd);
+    if (label) when.title = end ? `${label} ~ ${end}` : label;
   }
 
   const check = document.createElement('button');
